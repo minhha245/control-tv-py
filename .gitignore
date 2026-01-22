@@ -1,0 +1,70 @@
+# =========================
+# PYTHON CACHE
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.dll
+
+# =========================
+# VIRTUAL ENV
+# =========================
+venv/
+.env/
+.env.*
+
+# =========================
+# PYINSTALLER
+# =========================
+build/
+dist/
+*.spec
+
+# PyInstaller cache
+*.manifest
+*.log
+
+# =========================
+# EXECUTABLE OUTPUT
+# =========================
+*.exe
+*.msi
+
+# =========================
+# CONFIG / RUNTIME FILES
+# =========================
+config.json
+autokey_coords.json
+license.dat
+
+# =========================
+# VERSION FILE (build auto)
+# =========================
+version.txt
+
+# =========================
+# OS / IDE
+# =========================
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+*.iml
+
+# =========================
+# TEMP / LOG
+# =========================
+*.tmp
+*.bak
+*.swp
+*.log
+
+# =========================
+# MEDIA / ASSETS BUILD COPY
+# =========================
+dist/*.png
+dist/*.jpg
+dist/*.ico
