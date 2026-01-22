@@ -445,6 +445,20 @@ class App(ctk.CTk):
                 if self.btn_states.get(extra_key) != new_state:
                     self.on_btn_toggle(extra_key)
 
+        if key == "LOFI" and new_state:
+            # Cấu hình giọng Lofi: Tune 27, Flex 45, Vib 46, Human 47
+            # Setup preset Lofi: Retune 20 (Soft), Flex 0, Vib 0, Human 0
+            settings = [
+                ("TUNE", 20),           # Retune Speed (CC 27)
+                ("EXTRA_KNOB_1", 0),    # FlexTune (CC 45)
+                ("EXTRA_KNOB_2", 0),    # Natural Vibrato (CC 46)
+                ("EXTRA_KNOB_3", 0)     # Humanize (CC 47)
+            ]
+            for param, val in settings:
+                if param in self.slider_widgets:
+                    self.slider_widgets[param].set(val)
+                    self.on_slider_change(val, param)
+
     def on_btn_click(self, key):
         if key not in ["TONE_UP", "TONE_DOWN"]:
             cc = CC_MAP.get(key)

@@ -50,7 +50,6 @@ python -m PyInstaller ^
  --exclude-module xml ^
  --exclude-module pydoc ^
  --exclude-module setuptools ^
- --exclude-module distutils ^
  --exclude-module numpy ^
  --exclude-module cv2 ^
  --exclude-module pyautogui ^
