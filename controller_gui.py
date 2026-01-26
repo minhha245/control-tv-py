@@ -41,10 +41,24 @@ user32.SetForegroundWindow.argtypes = [wintypes.HWND]
 user32.ShowWindow.argtypes = [wintypes.HWND, wintypes.INT]
 user32.IsIconic.argtypes = [wintypes.HWND]
 user32.GetAsyncKeyState.argtypes = [wintypes.INT]
+user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, wintypes.ULONG]
 
 # Mouse event constants
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
+
+# Keyboard constants
+VK_CONTROL = 0x11
+VK_Q = 0x51
+VK_N = 0x4E
+VK_D = 0x44
+KEYEVENTF_KEYUP = 0x0002
+
+# Window messages
+WM_CLOSE = 0x0010
+WM_SYSCOMMAND = 0x0112
+SC_CLOSE = 0xF060
 
 # ShowWindow constants
 SW_RESTORE = 9
@@ -264,7 +278,7 @@ class App(ctk.CTk):
     # --- MAIN APP LOGIC ---
     def init_main_app(self):
         self.title("BẢNG ĐIỀU KHIỂN TIẾNG VIỆT - Hậu Setup Live Studio")
-        self.geometry("850x350")
+        self.geometry("830x210")
         self.resizable(False, False)
         self.configure(fg_color=self.col_bg)
 
@@ -315,8 +329,8 @@ class App(ctk.CTk):
             ("NHẠC", self.col_btn_green, "MUTE_MUSIC"),
             ("MIC", self.col_btn_green, "MUTE_MIC"),
             ("VANG", self.col_btn_red, "VANG_FX"),
-            ("LOFI", self.col_btn_red, "LOFI"),
-            ("REMIX", self.col_btn_red, "REMIX"),
+            # ("LOFI", self.col_btn_red, "LOFI"),
+            # ("REMIX", self.col_btn_red, "REMIX"),
             ("CÀI ĐẶT", "#1f77b4", "SETTINGS"),
             ("LƯU", self.col_btn_yellow, "SAVE")
         ]
@@ -380,14 +394,14 @@ class App(ctk.CTk):
             val_lbl.grid(row=i, column=2, padx=2, pady=5)
             self.slider_labels[cc_key] = val_lbl
 
-        bottom_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        bottom_frame.grid(row=len(sliders), column=0, columnspan=3, pady=5)
+        # bottom_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        # bottom_frame.grid(row=len(sliders), column=0, columnspan=3, pady=5)
 
-        opt = ctk.CTkOptionMenu(bottom_frame, values=["NHẠC TRẺ", "BOLERO", "REMIX"], fg_color="#1f77b4", height=24, font=("Arial", 11))
-        opt.pack(side="left", padx=5)
+        # opt = ctk.CTkOptionMenu(bottom_frame, values=["NHẠC TRẺ", "BOLERO", "REMIX"], fg_color="#1f77b4", height=24, font=("Arial", 11))
+        # opt.pack(side="left", padx=5)
 
-        btn_fix = ctk.CTkButton(bottom_frame, text="Fix Méo", fg_color="#d32f2f", width=60, height=24, font=("Arial", 11), command=lambda: self.on_btn_click("FIX_MEO"))
-        btn_fix.pack(side="left", padx=5)
+        # btn_fix = ctk.CTkButton(bottom_frame, text="Fix Méo", fg_color="#d32f2f", width=60, height=24, font=("Arial", 11), command=lambda: self.on_btn_click("FIX_MEO"))
+        # btn_fix.pack(side="left", padx=5)
 
     def setup_right_panel(self):
         frame = ctk.CTkFrame(self, fg_color="#101010", corner_radius=10, border_color="#444", border_width=2)
@@ -416,15 +430,15 @@ class App(ctk.CTk):
         self.tune_slider.configure(command=lambda v: self.on_slider_change(v, "TUNE"))
         self.slider_widgets["TUNE"] = self.tune_slider
 
-        for i in range(1, 6):
-            key = f"EXTRA_KNOB_{i}"
-            f = ctk.CTkFrame(frame, fg_color="transparent")
-            f.pack(pady=2, fill="x", padx=5)
-            ctk.CTkLabel(f, text=f"EX-{i}", font=("Arial", 9), width=30).pack(side="left")
-            s = ctk.CTkSlider(f, from_=0, to=127, progress_color="#444", height=14)
-            s.pack(side="left", padx=5, fill="x", expand=True)
-            s.configure(command=lambda v, k=key: self.on_slider_change(v, k))
-            self.slider_widgets[key] = s
+        # for i in range(1, 6):
+        #     key = f"EXTRA_KNOB_{i}"
+        #     f = ctk.CTkFrame(frame, fg_color="transparent")
+        #     f.pack(pady=2, fill="x", padx=5)
+        #     ctk.CTkLabel(f, text=f"EX-{i}", font=("Arial", 9), width=30).pack(side="left")
+        #     s = ctk.CTkSlider(f, from_=0, to=127, progress_color="#444", height=14)
+        #     s.pack(side="left", padx=5, fill="x", expand=True)
+        #     s.configure(command=lambda v, k=key: self.on_slider_change(v, k))
+        #     self.slider_widgets[key] = s
 
         ctk.CTkLabel(frame, text="BẢNG ĐIỀU KHIỂN TIẾNG VIỆT", font=("Arial", 11, "bold"), text_color=self.col_text_yellow).pack(side="bottom", pady=2)
         ctk.CTkLabel(frame, text="Hậu Setup Live Studio", font=("Arial", 10, "bold"), text_color=self.col_text_green).pack(side="bottom", pady=2)
@@ -826,7 +840,7 @@ class App(ctk.CTk):
                 return
 
             WindowsHelper.activate_window(cubase_wins[0]['hwnd'])
-            time.sleep(1.0)
+            time.sleep(0.3)
 
             autokey_wins = WindowsHelper.find_windows_by_title('Auto-Key')
             if not autokey_wins:
@@ -886,7 +900,7 @@ class App(ctk.CTk):
                 return
 
             WindowsHelper.activate_window(cubase_wins[0]['hwnd'])
-            time.sleep(1.0)
+            time.sleep(0.1)
 
             autokey_wins = WindowsHelper.find_windows_by_title('Auto-Key')
             if not autokey_wins:
@@ -918,6 +932,78 @@ class App(ctk.CTk):
             if btn: btn.configure(text="LẤY TONE", fg_color=orig_col, text_color="white")
 
     def on_closing(self):
+        print("\n🛑 Đang bắt đầu quy trình tắt Cubase...")
+        try:
+            # 1. Tìm tất cả cửa sổ liên quan đến Cubase
+            all_wins = WindowsHelper.find_windows_by_title('Cubase')
+            print(f"🔍 Tìm thấy {len(all_wins)} cửa sổ liên quan đến Cubase.")
+
+            if all_wins:
+                # Tìm cửa sổ có khả năng là cửa sổ Project nhất (thường có tên file .cpr)
+                main_hwnd = None
+                for w in all_wins:
+                    title = w['title']
+                    print(f"   - Window: {title}")
+                    if '.cpr' in title.lower() or 'cubase pro' in title.lower():
+                        main_hwnd = w['hwnd']
+                        break
+                
+                if not main_hwnd:
+                    main_hwnd = all_wins[0]['hwnd']
+
+                print(f"🚀 Đang gửi lệnh Ctrl+Q tới HWND: {main_hwnd}")
+                WindowsHelper.activate_window(main_hwnd)
+                time.sleep(0.5)
+                
+                # Giả lập Ctrl + Q
+                user32.keybd_event(VK_CONTROL, 0, 0, 0) # Ctrl down
+                user32.keybd_event(VK_Q, 0, 0, 0)       # Q down
+                time.sleep(0.05)
+                user32.keybd_event(VK_Q, 0, KEYEVENTF_KEYUP, 0) # Q up
+                user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0) # Ctrl up
+
+                # 2. Đợi hộp thoại "Save" hiện lên
+                print("⏳ Đang đợi hộp thoại xác nhận 'Save' (tối đa 5s)...")
+                found_dialog = False
+                for i in range(50):
+                    time.sleep(0.1)
+                    # Tìm cửa sổ có tiêu đề "Cubase Pro" hoặc "Cubase" mà không phải cửa sổ chính
+                    dialogs = WindowsHelper.find_windows_by_title('Cubase')
+                    for dlg in dialogs:
+                        # Hộp thoại thường có kích thước cố định và nhỏ
+                        w, h = dlg['rect']['width'], dlg['rect']['height']
+                        if dlg['hwnd'] != main_hwnd and 300 < w < 650 and 100 < h < 350:
+                            print(f"🎯 Đã phát hiện hộp thoại: '{dlg['title']}' ({w}x{h})")
+                            WindowsHelper.activate_window(dlg['hwnd'])
+                            time.sleep(0.5)
+                            
+                            # Tính toán vị trí nút "Don't Save" (nằm chính giữa hàng nút dưới cùng)
+                            click_x = dlg['rect']['left'] + (w // 2)
+                            click_y = dlg['rect']['top'] + h - 25 # Cách đáy khoảng 25 pixel
+                            
+                            print(f"🖱️ Click vào nút Don't Save tại ({click_x}, {click_y})")
+                            WindowsHelper.click(click_x, click_y)
+                            
+                            # Gửi thêm phím tắt cho chắc chắn (N hoặc D)
+                            for vk in [VK_N, VK_D]:
+                                user32.keybd_event(vk, 0, 0, 0) 
+                                time.sleep(0.05)
+                                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+                                time.sleep(0.05)
+                            
+                            print("✅ Đã chọn 'Don't Save'")
+                            found_dialog = True
+                            time.sleep(0.05) # Đợi Cubase đóng hẳn
+                            break
+                    if found_dialog: break
+                
+                if not found_dialog:
+                    print("⚠️ Không thấy hộp thoại xác nhận xuất hiện. Có thể Cubase đã đóng luôn hoặc không có gì để lưu.")
+
+        except Exception as e:
+            print(f"❌ Lỗi khi đóng Cubase: {e}")
+
+        print("👋 Đang đóng Tool...")
         self.destroy()
         os._exit(0)
 

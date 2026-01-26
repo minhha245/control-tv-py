@@ -96,39 +96,39 @@ var btnFixMeo = makeButton(23, 6, 36) // FIX MEO (CC 36)
 //-----------------------------------------------------------------------------
 var page = deviceDriver.mMapping.makePage('Main Control')
 
-var selectedTrack = deviceDriver.mHostAccess.mTrackSelection
+var selectedTrack = page.mHostAccess.mTrackSelection
 var mixer = selectedTrack.mMixerChannel
 
 // 1. Mic & Music Volume/Mute
-page.makeValueBinding(faderMic.mSurfaceValue, mixer.mValue.mVolume).setSubTitle('Mic Vol')
-page.makeValueBinding(btnMic.mSurfaceValue, mixer.mValue.mMute).setSubTitle('Mic Mute')
+page.makeValueBinding(faderMic.mSurfaceValue, mixer.mValue.mVolume)
+page.makeValueBinding(btnMic.mSurfaceValue, mixer.mValue.mMute)
 
-page.makeValueBinding(faderMusic.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(0)).setSubTitle('Music Vol (QC1)')
-page.makeValueBinding(btnNhac.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(1)).setSubTitle('Music Mute (QC2)')
+page.makeValueBinding(faderMusic.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(0))
+page.makeValueBinding(btnNhac.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(1))
 
 // 2. Reverb & Delay
-page.makeValueBinding(faderRevL.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(2)).setSubTitle('Rev Long')
-page.makeValueBinding(faderRevS.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(3)).setSubTitle('Rev Short')
-page.makeValueBinding(faderDelay.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(7)).setSubTitle('Delay Vol')
+page.makeValueBinding(faderRevL.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(2))
+page.makeValueBinding(faderRevS.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(3))
+page.makeValueBinding(faderDelay.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(7))
 
 // 3. Effects
-page.makeValueBinding(btnVang.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(4)).setSubTitle('Vang Trigger')
+page.makeValueBinding(btnVang.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(4))
 
 // 4. Tone/Tune
-page.makeValueBinding(knobTone.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(5)).setSubTitle('Tone Transpose')
-page.makeValueBinding(knobTune.mSurfaceValue, selectedTrack.mQuickControls.getByIndex(6)).setSubTitle('Tune/Pitch')
+page.makeValueBinding(knobTone.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(5))
+page.makeValueBinding(knobTune.mSurfaceValue, page.mHostAccess.mFocusedQuickControls.getByIndex(6))
 
 // 5. Extra Controls (Mapped to generic Host values for user binding)
-page.makeValueBinding(btnExtra1.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Btn 1')
-page.makeValueBinding(btnExtra2.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Btn 2')
-page.makeValueBinding(btnExtra3.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Btn 3')
-page.makeValueBinding(btnExtra4.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Btn 4')
-page.makeValueBinding(btnExtra5.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Btn 5')
+page.makeValueBinding(btnExtra1.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(btnExtra2.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(btnExtra3.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(btnExtra4.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(btnExtra5.mSurfaceValue, mixer.mValue.mSelected)
 
-page.makeValueBinding(knobExtra1.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Knob 1')
-page.makeValueBinding(knobExtra2.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Knob 2')
-page.makeValueBinding(knobExtra3.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Knob 3')
-page.makeValueBinding(knobExtra4.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Knob 4')
-page.makeValueBinding(knobExtra5.mSurfaceValue, selectedTrack.mValue.mSelected).setSubTitle('Extra Knob 5')
+page.makeValueBinding(knobExtra1.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(knobExtra2.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(knobExtra3.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(knobExtra4.mSurfaceValue, mixer.mValue.mSelected)
+page.makeValueBinding(knobExtra5.mSurfaceValue, mixer.mValue.mSelected)
 // TONE_UP and TONE_DOWN command bindings removed, now handled by knobTone value
 
