@@ -8,6 +8,7 @@ import ctypes
 import uuid
 import hashlib
 import tkinter.messagebox
+import tkinter.filedialog
 from ctypes import wintypes
 
 # Windows API structures and functions
@@ -283,7 +284,8 @@ class App(ctk.CTk):
             "listen_x_offset": 0.5,
             "listen_y_offset": 0.32,
             "send_x_offset": 0.5,
-            "send_y_from_bottom": 140
+            "send_y_from_bottom": 140,
+            "cubase_project_path": ""
         }
 
         self.setup_left_panel()
@@ -292,6 +294,16 @@ class App(ctk.CTk):
 
         self.load_settings()
         self.load_autokey_coords()
+        self.after(1000, self.open_saved_project)
+
+    def open_saved_project(self):
+        path = self.autokey_coords.get("cubase_project_path", "")
+        if path and os.path.exists(path):
+            try:
+                print(f"Opening Cubase project: {path}")
+                os.startfile(path)
+            except Exception as e:
+                print(f"Error opening project: {e}")
 
     def setup_left_panel(self):
         frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -654,7 +666,7 @@ class App(ctk.CTk):
 
         popup = ctk.CTkToplevel(self)
         popup.title("CÀI ĐẶT TỌA ĐỘ AUTO-KEY")
-        popup.geometry("550x450")
+        popup.geometry("550x520")
         popup.resizable(False, False)
         popup.configure(fg_color=self.col_bg)
 
@@ -727,6 +739,22 @@ class App(ctk.CTk):
 
         ctk.CTkButton(settings_frame, text="ĐO TỌA ĐỘ", fg_color="#ff9800", width=90, height=28, command=pick_send_coords).grid(row=2, column=3, rowspan=2, padx=10)
 
+        # File Project Selection
+        ctk.CTkLabel(settings_frame, text="File Project:", font=("Arial", 11, "bold")).grid(row=4, column=0, sticky="w", pady=8, padx=5)
+        project_entry = ctk.CTkEntry(settings_frame, width=150)
+        project_entry.insert(0, self.autokey_coords.get("cubase_project_path", ""))
+        project_entry.grid(row=4, column=1, columnspan=2, pady=8, padx=5, sticky="ew")
+
+        def choose_project():
+            path = tkinter.filedialog.askopenfilename(filetypes=[("Cubase Project", "*.cpr"), ("All Files", "*.*")])
+            if path:
+                project_entry.delete(0, "end")
+                project_entry.insert(0, path)
+                popup.lift()
+                popup.focus_force()
+
+        ctk.CTkButton(settings_frame, text="CHỌN FILE", fg_color="#1f77b4", width=90, height=28, command=choose_project).grid(row=4, column=3, padx=10)
+
         info_text = ctk.CTkTextbox(popup, height=80, width=500, fg_color="#2a2a2a")
         info_text.pack(pady=10, padx=20)
         info_text.insert("1.0",
@@ -747,6 +775,7 @@ class App(ctk.CTk):
                 self.autokey_coords["listen_y_offset"] = float(listen_y_entry.get()) / 100
                 self.autokey_coords["send_x_offset"] = float(send_x_entry.get()) / 100
                 self.autokey_coords["send_y_from_bottom"] = int(send_y_entry.get())
+                self.autokey_coords["cubase_project_path"] = project_entry.get()
 
                 if self.save_autokey_coords():
                     tkinter.messagebox.showinfo("Thành công", "Đã lưu tọa độ Auto-Key!")
