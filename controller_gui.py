@@ -1000,9 +1000,13 @@ class App(ctk.CTk):
         if self.autokey_loaded:
             return True
             
+        if getattr(self, "autokey_loading", False):
+            return False
+            
+        self.autokey_loading = True
         print("[Auto-Key] Loading heavy libraries (librosa, numpy, etc.)...")
         self.autokey_status_label.configure(text="● LOADING...", text_color="#ffa726")
-        self.update() # Refresh UI
+        self.update_idletasks() # Refresh UI colors
         
         try:
             # Determine base path
@@ -1016,6 +1020,7 @@ class App(ctk.CTk):
                 sys.path.insert(0, BASE_PATH)
 
             # Lazy Imports
+            import numpy as np
             from autokey_tool.audio_engine import AudioEngine
             from autokey_tool.dsp_pipeline import KeyDetector
             
@@ -1027,10 +1032,16 @@ class App(ctk.CTk):
             )
             self.key_detector = KeyDetector(
                 sample_rate=44100,
-                smoothing_history=20,
+                smoothing_history=12,  # Faster response
                 confidence_threshold=0.1,
                 use_hpss=True,
             )
+            
+            # Pre-warm detector (initializes librosa filters to avoid first-run delay)
+            print("[Auto-Key] Pre-warming detector...")
+            dummy_audio = np.zeros(44100, dtype=np.float32)
+            self.key_detector.detect_key(dummy_audio)
+            self.key_detector.reset()
             
             # Load devices
             self.loopback_devices = self.audio_engine.get_loopback_devices()
@@ -1049,9 +1060,14 @@ class App(ctk.CTk):
             tkinter.messagebox.showerror("Lỗi", f"Không thể tải Auto-Key: {e}")
             self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f")
             return False
+        finally:
+            self.autokey_loading = False
 
     def toggle_autokey_detection(self):
         """Toggle Auto-Key detection on/off."""
+        if getattr(self, "autokey_loading", False):
+            return
+            
         if not self.autokey_loaded:
             if not self.ensure_autokey_loaded():
                 return
@@ -1113,11 +1129,17 @@ class App(ctk.CTk):
     
     def stop_autokey_detection(self):
         """Stop key detection."""
+        if not self.autokey_running:
+            return
+            
         print("[Auto-Key] Stopping detection...")
         self.autokey_running = False
         
-        if self.audio_engine:
-            self.audio_engine.stop()
+        try:
+            if self.audio_engine:
+                self.audio_engine.stop()
+        except Exception as e:
+            print(f"[Auto-Key] Error stopping audio engine: {e}")
         
         # Update button appearance
         btn = self.btn_widgets.get("AUTO_KEY_DETECT")

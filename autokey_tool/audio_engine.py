@@ -138,9 +138,9 @@ class AudioEngine:
                 print("[AudioEngine] Error: Could not find loopback device")
                 return False
 
-            # Use device's native sample rate
+            # Use device's native format (crucial for WASAPI loopback)
             device_rate = int(self._loopback_device["defaultSampleRate"])
-            channels = min(2, self._loopback_device["maxInputChannels"])
+            channels = int(self._loopback_device["maxInputChannels"])
             
             print(f"[AudioEngine] Samplerate: {device_rate}Hz | Channels: {channels}")
             
@@ -194,9 +194,9 @@ class AudioEngine:
                 # Convert bytes to numpy array
                 data = np.frombuffer(raw_data, dtype=np.float32)
 
-                # Convert to mono if stereo
-                if self._channels == 2:
-                    data = data.reshape(-1, 2).mean(axis=1)
+                # Convert to mono if multi-channel
+                if self._channels > 1:
+                    data = data.reshape(-1, self._channels).mean(axis=1)
 
                 with self._lock:
                     self.audio_buffer.extend(data)
