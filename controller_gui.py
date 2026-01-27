@@ -11,6 +11,8 @@ import tkinter.messagebox
 import tkinter.filedialog
 from ctypes import wintypes
 
+import sys
+
 # Global flag for Auto-Key
 AUTOKEY_AVAILABLE = True # We check availability dynamically later
 
