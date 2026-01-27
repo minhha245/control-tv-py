@@ -28,7 +28,6 @@ REM ==============================
 REM CLEAN OLD BUILD
 REM ==============================
 rmdir /s /q build 2>nul
-rmdir /s /q dist 2>nul
 del /q *.spec 2>nul
 
 REM ==============================
@@ -36,24 +35,31 @@ REM BUILD
 REM ==============================
 echo [1/2] BUILDING EXE (OPTIMIZED)...
 
-python -m PyInstaller ^
- --onefile ^
+C:\Python311\python.exe -m PyInstaller ^
+ --onedir ^
  --windowed ^
  --clean ^
- --noupx ^
  --name "%APP_NAME%_v%NEW_VER%" ^
  --icon=%ICON% ^
+ --add-data "autokey_tool;autokey_tool" ^
+ --collect-all librosa ^
+ --collect-all pyaudiowpatch ^
+ --collect-all soundfile ^
+ --collect-all audioread ^
+ --collect-all soxr ^
+ --hidden-import=pkg_resources.extern ^
+ --hidden-import=sklearn.utils._typedefs ^
+ --hidden-import=sklearn.neighbors._partition_nodes ^
+ --hidden-import=scipy.signal ^
+ --hidden-import=scipy.fft ^
+ --hidden-import=scipy.ndimage ^
+ --hidden-import=numba ^
  --exclude-module tkinter.test ^
- --exclude-module unittest ^
- --exclude-module email ^
- --exclude-module http ^
- --exclude-module xml ^
- --exclude-module pydoc ^
- --exclude-module setuptools ^
- --exclude-module numpy ^
  --exclude-module cv2 ^
  --exclude-module pyautogui ^
  --exclude-module pygetwindow ^
+ --exclude-module matplotlib ^
+ --exclude-module PIL ^
  %MAIN_PY%
 
 if %errorlevel% neq 0 (
@@ -62,14 +68,16 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
+set DIST_DIR=dist\%APP_NAME%_v%NEW_VER%
+
 REM ==============================
 REM COPY DATA FILES
 REM ==============================
 echo [2/2] COPYING DATA FILES...
 
-if exist config.json copy /Y config.json dist\
-if exist autokey_coords.json copy /Y autokey_coords.json dist\
-if exist license.dat copy /Y license.dat dist\
+if exist config.json copy /Y config.json %DIST_DIR%\
+if exist autokey_coords.json copy /Y autokey_coords.json %DIST_DIR%\
+if exist license.dat copy /Y license.dat %DIST_DIR%\
 
 echo.
 echo =========================================

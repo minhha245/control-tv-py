@@ -11,6 +11,9 @@ import tkinter.messagebox
 import tkinter.filedialog
 from ctypes import wintypes
 
+# Global flag for Auto-Key
+AUTOKEY_AVAILABLE = True # We check availability dynamically later
+
 # Windows API structures and functions
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
@@ -278,7 +281,7 @@ class App(ctk.CTk):
     # --- MAIN APP LOGIC ---
     def init_main_app(self):
         self.title("BẢNG ĐIỀU KHIỂN TIẾNG VIỆT - Hậu Setup Live Studio")
-        self.geometry("830x210")
+        self.geometry("880x320")
         self.resizable(False, False)
         self.configure(fg_color=self.col_bg)
 
@@ -301,6 +304,18 @@ class App(ctk.CTk):
             "send_y_from_bottom": 140,
             "cubase_project_path": ""
         }
+
+        # Auto-Key Detection state
+        self.autokey_running = False
+        self.autokey_analysis_thread = None
+        self.audio_engine = None
+        self.key_detector = None
+        self.loopback_devices = []
+        self.autokey_loaded = False
+        
+        # We will initialize loopback_devices list separately or lazily
+        # For now, we'll try to get devices without loading heavy DSP libs if possible
+        # but usually AudioEngine needs to be loaded first. Let's make it fully lazy.
 
         self.setup_left_panel()
         self.setup_center_panel()
@@ -329,8 +344,7 @@ class App(ctk.CTk):
             ("NHẠC", self.col_btn_green, "MUTE_MUSIC"),
             ("MIC", self.col_btn_green, "MUTE_MIC"),
             ("VANG", self.col_btn_red, "VANG_FX"),
-            # ("LOFI", self.col_btn_red, "LOFI"),
-            # ("REMIX", self.col_btn_red, "REMIX"),
+            ("AUTO-KEY", "#00bcd4", "AUTO_KEY_DETECT"),  # Nút Auto-Key mới
             ("CÀI ĐẶT", "#1f77b4", "SETTINGS"),
             ("LƯU", self.col_btn_yellow, "SAVE")
         ]
@@ -352,6 +366,8 @@ class App(ctk.CTk):
                 cmd = self.save_settings
             elif cc_key == "SETTINGS":
                 cmd = self.open_settings_popup
+            elif cc_key == "AUTO_KEY_DETECT":
+                cmd = self.toggle_autokey_detection
 
             btn = ctk.CTkButton(
                 frame, text=text, fg_color=color,
@@ -430,15 +446,60 @@ class App(ctk.CTk):
         self.tune_slider.configure(command=lambda v: self.on_slider_change(v, "TUNE"))
         self.slider_widgets["TUNE"] = self.tune_slider
 
-        # for i in range(1, 6):
-        #     key = f"EXTRA_KNOB_{i}"
-        #     f = ctk.CTkFrame(frame, fg_color="transparent")
-        #     f.pack(pady=2, fill="x", padx=5)
-        #     ctk.CTkLabel(f, text=f"EX-{i}", font=("Arial", 9), width=30).pack(side="left")
-        #     s = ctk.CTkSlider(f, from_=0, to=127, progress_color="#444", height=14)
-        #     s.pack(side="left", padx=5, fill="x", expand=True)
-        #     s.configure(command=lambda v, k=key: self.on_slider_change(v, k))
-        #     self.slider_widgets[key] = s
+        # === AUTO-KEY DETECTION DISPLAY ===
+        autokey_frame = ctk.CTkFrame(frame, fg_color="#1a1a1a", corner_radius=8, border_color="#00bcd4", border_width=1)
+        autokey_frame.pack(pady=5, padx=5, fill="x")
+
+        autokey_header = ctk.CTkFrame(autokey_frame, fg_color="transparent")
+        autokey_header.pack(fill="x", padx=5, pady=(3, 0))
+        
+        ctk.CTkLabel(autokey_header, text="🎵 AUTO-KEY", font=("Arial", 9, "bold"), text_color="#00bcd4").pack(side="left")
+        
+        self.autokey_status_label = ctk.CTkLabel(autokey_header, text="● OFF", font=("Arial", 8), text_color="#d32f2f")
+        self.autokey_status_label.pack(side="right")
+
+        key_display_frame = ctk.CTkFrame(autokey_frame, fg_color="transparent")
+        key_display_frame.pack(pady=2)
+
+        # Key label (large)
+        self.detected_key_label = ctk.CTkLabel(
+            key_display_frame, 
+            text="---", 
+            font=("Arial", 24, "bold"), 
+            text_color="#00e676"
+        )
+        self.detected_key_label.pack(side="left", padx=5)
+
+        # Scale label
+        self.detected_scale_label = ctk.CTkLabel(
+            key_display_frame, 
+            text="", 
+            font=("Arial", 12), 
+            text_color="#ffa726"
+        )
+        self.detected_scale_label.pack(side="left", padx=2)
+
+        # Confidence bar
+        self.autokey_confidence_bar = ctk.CTkProgressBar(autokey_frame, height=6, progress_color="#00bcd4")
+        self.autokey_confidence_bar.pack(pady=(0, 4), padx=10, fill="x")
+        self.autokey_confidence_bar.set(0)
+
+        # Device selector
+        dev_frame = ctk.CTkFrame(autokey_frame, fg_color="transparent")
+        dev_frame.pack(fill="x", padx=5, pady=(0, 3))
+        
+        self.autokey_device_var = ctk.StringVar(value="Chọn nguồn âm thanh...")
+        self.autokey_device_select = ctk.CTkOptionMenu(
+            dev_frame, 
+            values=["Chọn nguồn âm thanh..."],
+            variable=self.autokey_device_var,
+            font=("Arial", 8),
+            height=20,
+            width=160,
+            fg_color="#333",
+            dropdown_fg_color="#2a2a2a"
+        )
+        self.autokey_device_select.pack(fill="x")
 
         ctk.CTkLabel(frame, text="BẢNG ĐIỀU KHIỂN TIẾNG VIỆT", font=("Arial", 11, "bold"), text_color=self.col_text_yellow).pack(side="bottom", pady=2)
         ctk.CTkLabel(frame, text="Hậu Setup Live Studio", font=("Arial", 10, "bold"), text_color=self.col_text_green).pack(side="bottom", pady=2)
@@ -931,8 +992,217 @@ class App(ctk.CTk):
             orig_col = self.btn_colors.get("LAY_TONE", self.col_btn_purple)
             if btn: btn.configure(text="LẤY TONE", fg_color=orig_col, text_color="white")
 
+    # === AUTO-KEY DETECTION METHODS ===
+    def ensure_autokey_loaded(self):
+        """Lazy load heavy Auto-Key libraries and initialize components."""
+        if self.autokey_loaded:
+            return True
+            
+        print("[Auto-Key] Loading heavy libraries (librosa, numpy, etc.)...")
+        self.autokey_status_label.configure(text="● LOADING...", text_color="#ffa726")
+        self.update() # Refresh UI
+        
+        try:
+            # Determine base path
+            if getattr(sys, 'frozen', False):
+                BASE_PATH = os.path.dirname(sys.executable)
+            else:
+                BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+
+            # Add to path
+            if BASE_PATH not in sys.path:
+                sys.path.insert(0, BASE_PATH)
+
+            # Lazy Imports
+            from autokey_tool.audio_engine import AudioEngine
+            from autokey_tool.dsp_pipeline import KeyDetector
+            
+            # Initialize components
+            self.audio_engine = AudioEngine(
+                sample_rate=44100,
+                buffer_seconds=1.5,
+                chunk_size=2048,
+            )
+            self.key_detector = KeyDetector(
+                sample_rate=44100,
+                smoothing_history=20,
+                confidence_threshold=0.1,
+                use_hpss=True,
+            )
+            
+            # Load devices
+            self.loopback_devices = self.audio_engine.get_loopback_devices()
+            device_names = [d['name'][:30] for d in self.loopback_devices]
+            if device_names:
+                self.autokey_device_select.configure(values=device_names)
+                self.autokey_device_var.set(device_names[0])
+            
+            self.autokey_loaded = True
+            print(f"[Auto-Key] Successfully loaded. Found {len(self.loopback_devices)} devices.")
+            return True
+        except Exception as e:
+            print(f"[Auto-Key] Error during lazy load: {e}")
+            import traceback
+            traceback.print_exc()
+            tkinter.messagebox.showerror("Lỗi", f"Không thể tải Auto-Key: {e}")
+            self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f")
+            return False
+
+    def toggle_autokey_detection(self):
+        """Toggle Auto-Key detection on/off."""
+        if not self.autokey_loaded:
+            if not self.ensure_autokey_loaded():
+                return
+        
+        if self.autokey_running:
+            self.stop_autokey_detection()
+        else:
+            self.start_autokey_detection()
+    
+    def start_autokey_detection(self):
+        """Start real-time key detection from audio loopback."""
+        if not self.autokey_loaded:
+            return
+            
+        if self.autokey_running:
+            return
+        
+        print("[Auto-Key] Starting detection...")
+        
+        # Get selected device
+        device_id = None
+        selected_name = self.autokey_device_var.get()
+        if self.loopback_devices:
+            for dev in self.loopback_devices:
+                if dev['name'][:30] == selected_name:
+                    device_id = dev['id']
+                    break
+        
+        # Start audio engine
+        if self.audio_engine.start(device_id=device_id):
+            # Update KeyDetector sample rate to match device
+            actual_rate = getattr(self.audio_engine, '_actual_sample_rate', 44100)
+            print(f"[Auto-Key] Sample rate: {actual_rate}Hz")
+            self.key_detector.sample_rate = actual_rate
+            self.key_detector.reset()
+            
+            self.autokey_running = True
+            
+            # Update button appearance
+            btn = self.btn_widgets.get("AUTO_KEY_DETECT")
+            if btn:
+                btn.configure(text="STOP", fg_color="#d32f2f", text_color="white")
+            
+            # Update status
+            self.autokey_status_label.configure(text="● LISTENING", text_color="#4caf50")
+            
+            # Disable device selector
+            if hasattr(self, 'autokey_device_select'):
+                self.autokey_device_select.configure(state="disabled")
+            
+            # Start analysis thread
+            self.autokey_analysis_thread = threading.Thread(
+                target=self._autokey_analysis_loop, 
+                daemon=True
+            )
+            self.autokey_analysis_thread.start()
+        else:
+            tkinter.messagebox.showerror("Lỗi", "Không thể bắt đầu capture audio loopback!")
+    
+    def stop_autokey_detection(self):
+        """Stop key detection."""
+        print("[Auto-Key] Stopping detection...")
+        self.autokey_running = False
+        
+        if self.audio_engine:
+            self.audio_engine.stop()
+        
+        # Update button appearance
+        btn = self.btn_widgets.get("AUTO_KEY_DETECT")
+        orig_color = self.btn_colors.get("AUTO_KEY_DETECT", "#00bcd4")
+        if btn:
+            btn.configure(text="AUTO-KEY", fg_color=orig_color, text_color="white")
+        
+        # Update status
+        self.autokey_status_label.configure(text="● OFF", text_color="#d32f2f")
+        
+        # Reset display
+        self.detected_key_label.configure(text="---")
+        self.detected_scale_label.configure(text="")
+        self.autokey_confidence_bar.set(0)
+        
+        # Re-enable device selector
+        if hasattr(self, 'autokey_device_select'):
+            self.autokey_device_select.configure(state="normal")
+    
+    def _autokey_analysis_loop(self):
+        """Main analysis loop running in separate thread."""
+        import numpy as np
+        import traceback
+        
+        error_count = 0
+        
+        while self.autokey_running:
+            try:
+                # Get audio buffer
+                audio = self.audio_engine.get_buffer()
+                rms = self.audio_engine.get_buffer_rms()
+                
+                if len(audio) > 0:
+                    # Detect key
+                    try:
+                        key, mode, confidence = self.key_detector.detect_key(audio)
+                        error_count = 0  # Reset error count on success
+                    except Exception as detect_err:
+                        error_count += 1
+                        if error_count <= 3:  # Only log first 3 errors
+                            print(f"[Auto-Key] Detection error: {detect_err}")
+                            traceback.print_exc()
+                        key, mode, confidence = None, None, 0.0
+                    
+                    # Update UI (thread-safe)
+                    self.after(0, self._update_autokey_display, key, mode, confidence, rms)
+                
+                # Analysis rate
+                time.sleep(0.15)
+                
+            except Exception as e:
+                print(f"[Auto-Key] Analysis loop error: {e}")
+                traceback.print_exc()
+                time.sleep(0.5)
+    
+    def _update_autokey_display(self, key, mode, confidence, rms):
+        """Update the Auto-Key UI with detected key (called from main thread)."""
+        if key and mode:
+            self.detected_key_label.configure(text=key)
+            self.detected_scale_label.configure(text=mode)
+            
+            # Update confidence bar
+            self.autokey_confidence_bar.set(confidence)
+            
+            # Color based on confidence
+            if confidence > 0.7:
+                self.autokey_confidence_bar.configure(progress_color="#4caf50")  # Green
+            elif confidence > 0.5:
+                self.autokey_confidence_bar.configure(progress_color="#ffa726")  # Orange
+            else:
+                self.autokey_confidence_bar.configure(progress_color="#d32f2f")  # Red
+        else:
+            # No valid detection
+            if rms < 0.005:
+                self.detected_scale_label.configure(text="Chờ âm thanh...")
+            else:
+                self.detected_scale_label.configure(text="Đang phân tích...")
+
     def on_closing(self):
-        print("\n🛑 Đang bắt đầu quy trình tắt Cubase...")
+        print("\n🛑 Đang bắt đầu quy trình tắt...")
+        
+        # Stop Auto-Key detection if running
+        if self.autokey_running:
+            print("[Auto-Key] Stopping detection before exit...")
+            self.stop_autokey_detection()
+        
+        print("🔍 Đang tìm cửa sổ Cubase...")
         try:
             # 1. Tìm tất cả cửa sổ liên quan đến Cubase
             all_wins = WindowsHelper.find_windows_by_title('Cubase')
