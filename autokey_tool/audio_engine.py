@@ -49,13 +49,13 @@ class AudioEngine:
 
         # Threading control
         self._running = False
-        self._thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
 
         # PyAudio instance
         self._pa: Optional[pyaudio.PyAudio] = None
         self._stream = None
         self._loopback_device = None
+        self._actual_sample_rate = 44100
 
     def _find_loopback_device(self) -> Optional[dict]:
         """Find the WASAPI loopback device for the default output."""
@@ -111,9 +111,32 @@ class AudioEngine:
                 pass
         return devices
 
+    def _stream_callback(self, in_data, frame_count, time_info, status):
+        """Callback for PyAudio to feed audio data."""
+        try:
+            # Convert bytes to numpy array
+            data = np.frombuffer(in_data, dtype=np.float32)
+
+            # Convert to mono if multi-channel
+            if self._channels > 1:
+                # Simple averaging for mono downmix
+                data = data.reshape(-1, self._channels).mean(axis=1)
+
+            with self._lock:
+                self.audio_buffer.extend(data)
+
+            # Call external callback if set
+            if self.on_audio_callback:
+                self.on_audio_callback(data)
+                
+            return (None, pyaudio.paContinue)
+        except Exception as e:
+            print(f"[AudioEngine] Callback error: {e}")
+            return (None, pyaudio.paContinue)
+
     def start(self, device_id: Optional[int] = None) -> bool:
         """
-        Start capturing audio from loopback.
+        Start capturing audio from loopback (Callback Mode).
 
         Args:
             device_id: Specific device ID to use, or None for auto-detect
@@ -147,7 +170,7 @@ class AudioEngine:
             self._actual_sample_rate = device_rate
             self._channels = channels
 
-            # Open stream
+            # Open stream in Callback mode (non-blocking)
             self._stream = self._pa.open(
                 format=pyaudio.paFloat32,
                 channels=channels,
@@ -155,11 +178,11 @@ class AudioEngine:
                 input=True,
                 input_device_index=self._loopback_device["index"],
                 frames_per_buffer=self.chunk_size,
+                stream_callback=self._stream_callback
             )
-
+            
+            self._stream.start_stream()
             self._running = True
-            self._thread = threading.Thread(target=self._capture_loop, daemon=True)
-            self._thread.start()
             return True
 
         except Exception as e:
@@ -171,45 +194,16 @@ class AudioEngine:
     def stop(self):
         """Stop audio capture."""
         self._running = False
-        if self._thread:
-            self._thread.join(timeout=2.0)
-            self._thread = None
         
         if self._stream:
-            self._stream.stop_stream()
-            self._stream.close()
-            self._stream = None
-
-    def _capture_loop(self):
-        """Main capture loop running in separate thread."""
-        try:
-            while self._running and self._stream:
-                # Read audio data
-                try:
-                    raw_data = self._stream.read(self.chunk_size, exception_on_overflow=False)
-                except Exception as e:
-                    print(f"Stream read error: {e}")
-                    continue
-
-                # Convert bytes to numpy array
-                data = np.frombuffer(raw_data, dtype=np.float32)
-
-                # Convert to mono if multi-channel
-                if self._channels > 1:
-                    data = data.reshape(-1, self._channels).mean(axis=1)
-
-                with self._lock:
-                    self.audio_buffer.extend(data)
-
-                # Call callback if set
-                if self.on_audio_callback:
-                    self.on_audio_callback(data)
-
-        except Exception as e:
-            print(f"Error in capture loop: {e}")
-            import traceback
-            traceback.print_exc()
-            self._running = False
+            try:
+                # Stop stream safely (waits for callback to finish)
+                self._stream.stop_stream()
+                self._stream.close()
+            except Exception as e:
+                print(f"[AudioEngine] Error closing stream: {e}")
+            finally:
+                self._stream = None
 
     def get_buffer(self) -> np.ndarray:
         """

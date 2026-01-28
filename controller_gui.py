@@ -1065,99 +1065,133 @@ class App(ctk.CTk):
 
     def toggle_autokey_detection(self):
         """Toggle Auto-Key detection on/off."""
-        if getattr(self, "autokey_loading", False):
+        # Check if already processing a start/stop action
+        if getattr(self, "autokey_processing", False) or getattr(self, "autokey_loading", False):
             return
             
         if not self.autokey_loaded:
+            # First load might be slow, let's keep it synchronous 
+            # or could be moved to thread if really needed
             if not self.ensure_autokey_loaded():
                 return
         
+        self.autokey_processing = True
+        btn = self.btn_widgets.get("AUTO_KEY_DETECT")
+        
         if self.autokey_running:
-            self.stop_autokey_detection()
+            # STOPPING
+            if btn: btn.configure(text="STOP...", fg_color="#888")
+            threading.Thread(target=self.stop_autokey_worker, daemon=True).start()
         else:
-            self.start_autokey_detection()
+            # STARTING
+            if btn: btn.configure(text="START...", fg_color="#888")
+            threading.Thread(target=self.start_autokey_worker, daemon=True).start()
     
-    def start_autokey_detection(self):
-        """Start real-time key detection from audio loopback."""
-        if not self.autokey_loaded:
-            return
-            
-        if self.autokey_running:
-            return
-        
-        print("[Auto-Key] Starting detection...")
-        
-        # Get selected device
-        device_id = None
-        selected_name = self.autokey_device_var.get()
-        if self.loopback_devices:
-            for dev in self.loopback_devices:
-                if dev['name'][:30] == selected_name:
-                    device_id = dev['id']
-                    break
-        
-        # Start audio engine
-        if self.audio_engine.start(device_id=device_id):
-            # Update KeyDetector sample rate to match device
-            actual_rate = getattr(self.audio_engine, '_actual_sample_rate', 44100)
-            print(f"[Auto-Key] Sample rate: {actual_rate}Hz")
-            self.key_detector.sample_rate = actual_rate
-            self.key_detector.reset()
-            
-            self.autokey_running = True
-            
-            # Update button appearance
-            btn = self.btn_widgets.get("AUTO_KEY_DETECT")
-            if btn:
-                btn.configure(text="STOP", fg_color="#d32f2f", text_color="white")
-            
-            # Update status
-            self.autokey_status_label.configure(text="● LISTENING", text_color="#4caf50")
-            
-            # Disable device selector
-            if hasattr(self, 'autokey_device_select'):
-                self.autokey_device_select.configure(state="disabled")
-            
-            # Start analysis thread
-            self.autokey_analysis_thread = threading.Thread(
-                target=self._autokey_analysis_loop, 
-                daemon=True
-            )
-            self.autokey_analysis_thread.start()
-        else:
-            tkinter.messagebox.showerror("Lỗi", "Không thể bắt đầu capture audio loopback!")
-    
-    def stop_autokey_detection(self):
-        """Stop key detection."""
-        if not self.autokey_running:
-            return
-            
-        print("[Auto-Key] Stopping detection...")
-        self.autokey_running = False
-        
+    def start_autokey_worker(self):
+        """Worker thread for starting detection."""
         try:
+            print("[Auto-Key] Starting detection worker...")
+            
+            if self.autokey_running:
+                self.after(0, self._finish_processing)
+                return
+            
+            # Get selected device (must be done in thread safely, 
+            # but reading Tkinter var should be done via after or is str var thread safe? 
+            # Tkvar.get() is usually fine if mainloop running, but better safe.)
+            # We'll assume self.autokey_device_var.get() is safe enough or was cached.
+            # Actually, let's get it before thread start? Too late now, let's use a cached property or try get.
+            try:
+                selected_name = self.autokey_device_var.get()
+            except:
+                selected_name = ""
+
+            device_id = None
+            if self.loopback_devices:
+                for dev in self.loopback_devices:
+                    if dev['name'][:30] == selected_name:
+                        device_id = dev['id']
+                        break
+            
+            # Start audio engine
+            if self.audio_engine.start(device_id=device_id):
+                # Update KeyDetector sample rate
+                actual_rate = getattr(self.audio_engine, '_actual_sample_rate', 44100)
+                print(f"[Auto-Key] Sample rate: {actual_rate}Hz")
+                
+                self.key_detector.sample_rate = actual_rate
+                self.key_detector.reset()
+                
+                self.autokey_running = True
+                
+                # Start analysis thread
+                if self.autokey_analysis_thread is None or not self.autokey_analysis_thread.is_alive():
+                    self.autokey_analysis_thread = threading.Thread(
+                        target=self._autokey_analysis_loop, 
+                        daemon=True
+                    )
+                    self.autokey_analysis_thread.start()
+                
+                self.after(0, self._on_autokey_started)
+            else:
+                self.after(0, lambda: tkinter.messagebox.showerror("Lỗi", "Không thể bắt đầu capture audio loopback!"))
+                self.after(0, self._on_autokey_stopped)
+
+        except Exception as e:
+            print(f"Error starting autokey: {e}")
+            self.after(0, self._on_autokey_stopped)
+        finally:
+            self.after(0, self._finish_processing)
+
+    def stop_autokey_worker(self):
+        """Worker thread for stopping detection."""
+        try:
+            print("[Auto-Key] Stopping detection worker...")
+            self.autokey_running = False
+            
             if self.audio_engine:
                 self.audio_engine.stop()
+                
         except Exception as e:
             print(f"[Auto-Key] Error stopping audio engine: {e}")
+        finally:
+            self.after(0, self._on_autokey_stopped)
+            self.after(0, self._finish_processing)
+
+    def _finish_processing(self):
+        self.autokey_processing = False
+
+    def _on_autokey_started(self):
+        btn = self.btn_widgets.get("AUTO_KEY_DETECT")
+        if btn:
+            btn.configure(text="STOP", fg_color="#d32f2f", text_color="white")
         
-        # Update button appearance
+        self.autokey_status_label.configure(text="● LISTENING", text_color="#4caf50")
+        if hasattr(self, 'autokey_device_select'):
+            self.autokey_device_select.configure(state="disabled")
+
+    def _on_autokey_stopped(self):
         btn = self.btn_widgets.get("AUTO_KEY_DETECT")
         orig_color = self.btn_colors.get("AUTO_KEY_DETECT", "#00bcd4")
         if btn:
             btn.configure(text="AUTO-KEY", fg_color=orig_color, text_color="white")
         
-        # Update status
         self.autokey_status_label.configure(text="● OFF", text_color="#d32f2f")
-        
-        # Reset display
         self.detected_key_label.configure(text="---")
         self.detected_scale_label.configure(text="")
         self.autokey_confidence_bar.set(0)
         
-        # Re-enable device selector
         if hasattr(self, 'autokey_device_select'):
             self.autokey_device_select.configure(state="normal")
+            
+    # Kept for compatibility if called directly, but should use toggle
+    def start_autokey_detection(self):
+        self.toggle_autokey_detection()
+            
+    def stop_autokey_detection(self):
+        if self.autokey_running and not getattr(self, "autokey_processing", False):
+            self.autokey_processing = True
+            threading.Thread(target=self.stop_autokey_worker, daemon=True).start()
     
     def _autokey_analysis_loop(self):
         """Main analysis loop running in separate thread."""
@@ -1195,11 +1229,75 @@ class App(ctk.CTk):
                 traceback.print_exc()
                 time.sleep(0.5)
     
+    def send_autokey_midi(self, key_str, scale_str):
+        if not key_str or not scale_str: return
+
+        # Auto-Tune Keys Mapping (12 keys)
+        KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+        FLAT_MAP = {"Db":"C#", "Eb":"D#", "Gb":"F#", "Ab":"G#", "Bb":"A#"}
+
+        # Auto-Tune Scales Mapping (29 scales)
+        SCALES = [
+            "Major", "Minor", "Chromatic", "Ling Lun", "Scholar's Lute", "Greek Diatonic",
+            "Greek Chromatic", "Greek Enharmonic", "Pythagorean", "Just (Major)", "Just (Minor)",
+            "Meantone Chromatic", "Werckmeister I (III)", "Vallotti & Young", "Barnes-Bach",
+            "Indian", "Slendro", "Pelog", "Arabic 1", "Arabic 2", "19 Tone", "24 Tone",
+            "31 Tone", "53 Tone", "Partch", "Carlos A", "Carlos B", "Carlos G", "Harmonic"
+        ]
+
+        # 1. Handle Key
+        k = key_str.strip()
+        # Handle normalization
+        if k not in KEYS:
+            # Check flat map
+            if k in FLAT_MAP:
+                k = FLAT_MAP[k]
+            else:
+                # Case-insensitive check
+                found = False
+                for fl, sh in FLAT_MAP.items():
+                    if k.lower() == fl.lower():
+                        k = sh
+                        found = True
+                        break
+                if not found:
+                    for ref in KEYS:
+                        if k.lower() == ref.lower():
+                            k = ref
+                            found = True
+                            break
+        
+        if k in KEYS:
+            idx = KEYS.index(k)
+            # Map index 0-11 to 0-127
+            val = int(idx * (127 / (len(KEYS) - 1)))
+            midi.send_cc(CC_MAP["EXTRA_KNOB_1"], val)
+            # Debug
+            # print(f"Sent Key {k} (validx {idx}) -> CC {val}")
+
+        # 2. Handle Scale
+        s_in = scale_str.strip().lower()
+        scale_idx = -1
+        
+        for i, s_ref in enumerate(SCALES):
+            if s_in == s_ref.lower():
+                scale_idx = i
+                break
+        
+        if scale_idx != -1:
+            val = int(scale_idx * (127 / (len(SCALES) - 1)))
+            midi.send_cc(CC_MAP["EXTRA_KNOB_2"], val)
+            # Debug
+            # print(f"Sent Scale {scale_str} (validx {scale_idx}) -> CC {val}")
+
     def _update_autokey_display(self, key, mode, confidence, rms):
         """Update the Auto-Key UI with detected key (called from main thread)."""
         if key and mode:
             self.detected_key_label.configure(text=key)
             self.detected_scale_label.configure(text=mode)
+            
+            # Send detected Key/Scale to MIDI
+            self.send_autokey_midi(key, mode)
             
             # Update confidence bar
             self.autokey_confidence_bar.set(confidence)
