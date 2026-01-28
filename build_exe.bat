@@ -6,7 +6,7 @@ REM CONFIG
 REM ==============================
 set APP_NAME=BangDieuKhienAudio
 set MAIN_PY=controller_gui.py
-set ICON=NONE
+set ICON=hau_studio.ico
 set VERSION_FILE=version.txt
 
 REM ==============================

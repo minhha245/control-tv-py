@@ -170,20 +170,81 @@ class AudioEngine:
             self._actual_sample_rate = device_rate
             self._channels = channels
 
-            # Open stream in Callback mode (non-blocking)
-            self._stream = self._pa.open(
-                format=pyaudio.paFloat32,
-                channels=channels,
-                rate=device_rate,
-                input=True,
-                input_device_index=self._loopback_device["index"],
-                frames_per_buffer=self.chunk_size,
-                stream_callback=self._stream_callback
-            )
+            # Try to open and start the stream with retries
+            import time
+            max_retries = 3
+            last_error = None
             
-            self._stream.start_stream()
-            self._running = True
-            return True
+            for attempt in range(max_retries):
+                try:
+                    # Open stream in Callback mode (non-blocking) within retry loop
+                    # We set start=False to separate creation from execution
+                    self._stream = self._pa.open(
+                        format=pyaudio.paFloat32,
+                        channels=channels,
+                        rate=device_rate,
+                        input=True,
+                        input_device_index=self._loopback_device["index"],
+                        frames_per_buffer=self.chunk_size,
+                        stream_callback=self._stream_callback,
+                        start=False
+                    )
+                    
+                    self._stream.start_stream()
+                    self._running = True
+                    return True
+                    
+                except Exception as e:
+                    last_error = e
+                    print(f"[AudioEngine] Start attempt {attempt+1} failed: {e}")
+                    
+                    # Clean up failed stream
+                    if self._stream:
+                        try:
+                            self._stream.stop_stream()
+                        except: pass
+                        try:
+                            self._stream.close()
+                        except: pass
+                        self._stream = None
+                    
+                    # If failed, completely restart PyAudio subsystem
+                    # This fixes "Unanticipated host error" caused by stale handles
+                    if attempt < max_retries - 1:
+                        print("[AudioEngine] Re-initializing PyAudio subsystem...")
+                        try:
+                            self._pa.terminate()
+                        except: pass
+                        
+                        self._pa = pyaudio.PyAudio()
+                        
+                        # Re-find device by NAME (ID might change)
+                        found_new = False
+                        target_name = self._loopback_device["name"]
+                        
+                        for i in range(self._pa.get_device_count()):
+                            try:
+                                dev = self._pa.get_device_info_by_index(i)
+                                if dev["name"] == target_name:
+                                    self._loopback_device = dev
+                                    found_new = True
+                                    # Update params in case they changed
+                                    device_rate = int(dev["defaultSampleRate"])
+                                    channels = int(dev["maxInputChannels"])
+                                    break
+                            except: pass
+                            
+                        if not found_new:
+                            print(f"[AudioEngine] Could not find device '{target_name}' after re-init. Using default loopback.")
+                            self._loopback_device = self._find_loopback_device()
+                            if self._loopback_device:
+                                device_rate = int(self._loopback_device["defaultSampleRate"])
+                                channels = int(self._loopback_device["maxInputChannels"])
+
+                        time.sleep(1.0)
+            
+            if last_error:
+                raise last_error
 
         except Exception as e:
             print(f"Error starting audio capture: {e}")
