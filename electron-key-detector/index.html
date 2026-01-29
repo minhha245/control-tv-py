@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.youtube.com https://www.youtube-nocookie.com blob:; media-src *; img-src * data:;">
+    <title>Key Detector - Hau Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <circle cx="16" cy="16" r="14" stroke="url(#logo-gradient)" stroke-width="2" />
+                    <path d="M10 16L14 20L22 12" stroke="url(#logo-gradient)" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <defs>
+                        <linearGradient id="logo-gradient" x1="0" y1="0" x2="32" y2="32">
+                            <stop stop-color="#8B5CF6" />
+                            <stop offset="1" stop-color="#D946EF" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="logo-text">Key Detector</span>
+            </div>
+            <div class="status-bar">
+                <div class="status-item" id="pythonStatus">
+                    <span class="status-dot disconnected"></span>
+                    <span>Cubase Bridge</span>
+                </div>
+                <div class="status-item" id="audioStatus">
+                    <span class="status-dot disconnected"></span>
+                    <span>Audio Capture</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Panel: YouTube Browser -->
+            <section class="youtube-section">
+                <div class="section-header">
+                    <h2>YouTube Browser</h2>
+                    <div class="nav-controls">
+                        <button id="backBtn" class="btn btn-icon" title="Back">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M19 12H5M12 19l-7-7 7-7" />
+                            </svg>
+                        </button>
+                        <button id="forwardBtn" class="btn btn-icon" title="Forward">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M5 12h14M12 5l7 7-7 7" />
+                            </svg>
+                        </button>
+                        <button id="refreshBtn" class="btn btn-icon" title="Refresh">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M23 4v6h-6M1 20v-6h6" />
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                            </svg>
+                        </button>
+                        <button id="homeBtn" class="btn btn-icon" title="Home">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="youtube-browser-container">
+                    <webview id="youtubeWebview" src="https://www.youtube.com" partition="persist:youtube" allowpopups>
+                    </webview>
+                </div>
+            </section>
+
+            <!-- Right Panel: Key Detection -->
+            <section class="detection-section">
+                <div class="section-header">
+                    <h2>Detected Key</h2>
+                    <div class="header-controls">
+                        <select id="audioSourceSelect" class="source-select">
+                            <option value="">Auto Select Source</option>
+                        </select>
+                        <button id="startDetectionBtn" class="btn btn-accent">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="12" cy="12" r="10" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+                            Start
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Key Display -->
+                <div class="key-display-container">
+                    <div class="key-display">
+                        <div class="key-ring">
+                            <div class="key-value" id="keyValue">--</div>
+                        </div>
+                        <div class="scale-badge" id="scaleBadge">
+                            <span id="scaleValue">Waiting...</span>
+                        </div>
+                    </div>
+
+                    <!-- Input Level -->
+                    <div class="confidence-section" style="margin-bottom: 12px;">
+                        <div class="confidence-header">
+                            <span>Input Level</span>
+                            <span id="inputLevelValue">-100dB</span>
+                        </div>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" id="inputLevelFill"
+                                style="width: 0%; background: var(--accent-green);"></div>
+                        </div>
+                    </div>
+
+                    <!-- Confidence Meter -->
+                    <div class="confidence-section">
+                        <div class="confidence-header">
+                            <span>Confidence</span>
+                            <span id="confidenceValue">0%</span>
+                        </div>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" id="confidenceFill" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Chroma Visualization -->
+                    <div class="chroma-section">
+                        <h3>Chroma Profile</h3>
+                        <div class="chroma-bars" id="chromaBars">
+                            <div class="chroma-bar" data-note="C"><span>C</span></div>
+                            <div class="chroma-bar" data-note="C#"><span>C#</span></div>
+                            <div class="chroma-bar" data-note="D"><span>D</span></div>
+                            <div class="chroma-bar" data-note="D#"><span>D#</span></div>
+                            <div class="chroma-bar" data-note="E"><span>E</span></div>
+                            <div class="chroma-bar" data-note="F"><span>F</span></div>
+                            <div class="chroma-bar" data-note="F#"><span>F#</span></div>
+                            <div class="chroma-bar" data-note="G"><span>G</span></div>
+                            <div class="chroma-bar" data-note="G#"><span>G#</span></div>
+                            <div class="chroma-bar" data-note="A"><span>A</span></div>
+                            <div class="chroma-bar" data-note="A#"><span>A#</span></div>
+                            <div class="chroma-bar" data-note="B"><span>B</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="actions-section">
+                    <button id="sendToCubaseBtn" class="btn btn-success btn-large" disabled>
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M22 2L11 13" />
+                            <path d="M22 2L15 22L11 13L2 9L22 2Z" />
+                        </svg>
+                        Send to Cubase
+                    </button>
+                    <div class="action-info">
+                        <p id="lastSentInfo">No key sent yet</p>
+                    </div>
+                </div>
+
+                <!-- History -->
+                <div class="history-section">
+                    <h3>Detection History</h3>
+                    <div class="history-list" id="historyList">
+                        <div class="history-empty">No detections yet</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <span>Hau Studio © 2026</span>
+            <span class="version">v1.0.0</span>
+        </footer>
+    </div>
+
+    <!-- Essentia.js WASM -->
+    <script src="https://cdn.jsdelivr.net/npm/essentia.js@0.1.3/dist/essentia-wasm.web.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/essentia.js@0.1.3/dist/essentia.js-core.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

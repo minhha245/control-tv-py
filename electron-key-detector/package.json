@@ -1,0 +1,24 @@
+{
+    "name": "key-detector",
+    "version": "1.0.0",
+    "description": "YouTube Key/Scale Detector with Essentia.js - Antares Grade Accuracy",
+    "main": "main.js",
+    "scripts": {
+        "start": "electron .",
+        "dev": "electron ."
+    },
+    "keywords": [
+        "key-detection",
+        "music",
+        "essentia",
+        "electron"
+    ],
+    "author": "Hau Studio",
+    "license": "MIT",
+    "devDependencies": {
+        "electron": "^28.0.0"
+    },
+    "dependencies": {
+        "essentia.js": "^0.1.3"
+    }
+}

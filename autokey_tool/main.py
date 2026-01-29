@@ -19,7 +19,7 @@ except ImportError:
     from ttkbootstrap.constants import *
 
 from audio_engine import AudioEngine
-from dsp_pipeline import KeyDetector
+from key_detector_improved import KeyDetector
 
 
 class AutoKeyApp:
@@ -29,14 +29,15 @@ class AutoKeyApp:
     - Always-on-top floating window
     - Real-time key detection
     - Modern, professional UI
+    - Enhanced stability with improved key locking
     """
 
     def __init__(self):
         # Create main window
         self.root = ttk.Window(
-            title="AutoKey",
+            title="AutoKey Pro",
             themename="darkly",
-            size=(400, 350),  # Increased size to ensure visibility
+            size=(400, 380),  # Slightly taller for new features
             resizable=(True, True),
         )
 
@@ -46,7 +47,7 @@ class AutoKeyApp:
         # Initialize components
         self.audio_engine = AudioEngine(
             sample_rate=44100,
-            buffer_seconds=1.5, # Reduced for faster response
+            buffer_seconds=1.5,  # Reduced for faster response
             chunk_size=2048,
         )
         
@@ -56,16 +57,20 @@ class AutoKeyApp:
         for d in self.device_list:
             print(f"  - [{d['id']}] {d['name']}")
         
+        # Initialize improved KeyDetector with optimal settings
         self.key_detector = KeyDetector(
             sample_rate=44100,  # Will be updated when audio starts
-            smoothing_history=20,
-            confidence_threshold=0.1,
+            short_history=8,    # Fast response (~2.5 seconds)
+            long_history=20,    # Stability buffer (~6-7 seconds)
+            confidence_threshold=0.12,  # Slightly lower for better detection
+            min_rms_threshold=0.001,
             use_hpss=True,
         )
 
         # State
         self.is_running = False
         self.analysis_thread: Optional[threading.Thread] = None
+        self.last_key_update = 0  # Timestamp for UI update throttling
 
         # Build UI
         self._build_ui()
@@ -130,16 +135,45 @@ class AutoKeyApp:
         )
         self.start_btn.pack(fill=X)
 
-        # Confidence meter frame
-        conf_frame = ttk.Frame(main_frame)
-        conf_frame.pack(fill=X)
+        # Confidence meter frame with label
+        conf_container = ttk.Frame(main_frame)
+        conf_container.pack(fill=X, pady=(5, 0))
         
+        # Confidence label
+        conf_label_frame = ttk.Frame(conf_container)
+        conf_label_frame.pack(fill=X)
+        
+        ttk.Label(
+            conf_label_frame,
+            text="Confidence:",
+            font=("Segoe UI", 9),
+            bootstyle="secondary"
+        ).pack(side=LEFT)
+        
+        self.conf_percent_label = ttk.Label(
+            conf_label_frame,
+            text="0%",
+            font=("Segoe UI", 9, "bold"),
+            bootstyle="info"
+        )
+        self.conf_percent_label.pack(side=RIGHT)
+        
+        # Progress bar
         self.confidence_bar = ttk.Progressbar(
-            conf_frame,
+            conf_container,
             mode="determinate",
             bootstyle="success-striped",
         )
-        self.confidence_bar.pack(fill=X)
+        self.confidence_bar.pack(fill=X, pady=(3, 0))
+
+        # Lock indicator
+        self.lock_label = ttk.Label(
+            main_frame,
+            text="🔓 Detecting...",
+            font=("Segoe UI", 9),
+            bootstyle="secondary"
+        )
+        self.lock_label.pack(pady=(5, 0))
 
         # Status label (bottom)
         self.status_label = ttk.Label(
@@ -174,7 +208,7 @@ class AutoKeyApp:
             self.key_detector.reset()  # Reset buffers with new sample rate
             
             self.is_running = True
-            self.start_btn.configure(text="■ Stop", bootstyle="danger")
+            self.start_btn.configure(text="■ STOP", bootstyle="danger")
             self.status_label.configure(text="● Listening", bootstyle="success")
             self.device_select.configure(state="disabled")
 
@@ -190,13 +224,16 @@ class AutoKeyApp:
         """Stop audio capture."""
         self.is_running = False
         self.audio_engine.stop()
-        self.start_btn.configure(text="▶ Start", bootstyle="success")
+        self.start_btn.configure(text="▶ START LISTENING", bootstyle="success")
         self.status_label.configure(text="● Stopped", bootstyle="danger")
+        self.device_select.configure(state="readonly")
 
         # Reset display
         self.key_label.configure(text="---")
         self.mode_label.configure(text="Stopped")
         self.confidence_bar["value"] = 0
+        self.conf_percent_label.configure(text="0%")
+        self.lock_label.configure(text="🔓 Stopped")
 
     def _analysis_loop(self):
         """Main analysis loop running in separate thread."""
@@ -207,49 +244,74 @@ class AutoKeyApp:
                 rms = self.audio_engine.get_buffer_rms()
                 
                 if len(audio) > 0:
-                    # Log to terminal for debugging
-                    print(f"[Loop] Buffer: {len(audio)} | RMS: {rms:.6f}")
-                    
-                    # Detect key
+                    # Detect key (this includes all the smart smoothing and locking)
                     key, mode, confidence = self.key_detector.detect_key(audio)
 
-                    # Update UI (thread-safe)
-                    self.root.after(0, self._update_display, key, mode, confidence)
+                    # Update UI (thread-safe) - throttle to every 100ms max
+                    current_time = time.time()
+                    if current_time - self.last_key_update > 0.1:
+                        self.root.after(0, self._update_display, key, mode, confidence, rms)
+                        self.last_key_update = current_time
 
-                # Analysis rate (faster updates)
+                # Analysis rate (10 FPS for smooth updates)
                 time.sleep(0.1)
 
             except Exception as e:
-                print(f"Analysis error: {e}")
+                print(f"[Error] Analysis loop: {e}")
+                import traceback
+                traceback.print_exc()
                 time.sleep(0.5)
 
-    def _update_display(self, key: Optional[str], mode: Optional[str], confidence: float):
+    def _update_display(self, key: Optional[str], mode: Optional[str], confidence: float, rms: float):
         """Update the UI with detected key (called from main thread)."""
         if key and mode:
             self.key_label.configure(text=key)
             self.mode_label.configure(text=mode)
 
-            # Update confidence bar
+            # Update confidence bar and percentage
             conf_percent = int(confidence * 100)
             self.confidence_bar["value"] = conf_percent
+            self.conf_percent_label.configure(text=f"{conf_percent}%")
 
             # Color based on confidence
             if confidence > 0.7:
                 self.confidence_bar.configure(bootstyle="success-striped")
+                self.conf_percent_label.configure(bootstyle="success")
             elif confidence > 0.5:
                 self.confidence_bar.configure(bootstyle="warning-striped")
+                self.conf_percent_label.configure(bootstyle="warning")
             else:
-                self.confidence_bar.configure(bootstyle="danger-striped")
+                self.confidence_bar.configure(bootstyle="info-striped")
+                self.conf_percent_label.configure(bootstyle="info")
+
+            # Update lock indicator based on lock_strength
+            lock_strength = self.key_detector.lock_strength
+            if lock_strength > 0.7:
+                self.lock_label.configure(text="🔒 Locked (Strong)", bootstyle="success")
+            elif lock_strength > 0.4:
+                self.lock_label.configure(text="🔐 Locked (Medium)", bootstyle="warning")
+            elif lock_strength > 0.1:
+                self.lock_label.configure(text="🔓 Locking...", bootstyle="info")
+            else:
+                self.lock_label.configure(text="🔍 Detecting...", bootstyle="secondary")
+
         else:
             # No valid detection
-            rms = self.audio_engine.get_buffer_rms()
             if rms < 0.005:
                 self.mode_label.configure(text="Waiting for audio...")
+                self.lock_label.configure(text="🔇 Silent", bootstyle="secondary")
             else:
                 self.mode_label.configure(text="Analyzing...")
+                self.lock_label.configure(text="🔍 Detecting...", bootstyle="info")
+            
+            # Keep confidence bar showing last value during silence
+            if rms < 0.001:
+                self.confidence_bar["value"] = 0
+                self.conf_percent_label.configure(text="0%")
 
     def _on_close(self):
         """Handle window close."""
+        print("\n[Exit] Shutting down...")
         self._stop_listening()
         self.root.destroy()
 
@@ -260,13 +322,26 @@ class AutoKeyApp:
 
 def main():
     """Entry point."""
-    print("=" * 50)
-    print("  AutoKey Tool - Musical Key Detection")
-    print("=" * 50)
+    print("=" * 60)
+    print("  AutoKey Pro - Musical Key Detection (Enhanced)")
+    print("=" * 60)
+    print("\nFeatures:")
+    print("  • Multi-scale temporal smoothing")
+    print("  • Confidence-weighted key locking")
+    print("  • Relative key detection (prevents flickering)")
+    print("  • Adaptive thresholding")
+    print("  • Enhanced HPCP (STFT + CQT + CENS)")
     print("\nStarting application...")
 
-    app = AutoKeyApp()
-    app.run()
+    try:
+        app = AutoKeyApp()
+        app.run()
+    except KeyboardInterrupt:
+        print("\n\n[Exit] Interrupted by user")
+    except Exception as e:
+        print(f"\n[Error] Fatal error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":

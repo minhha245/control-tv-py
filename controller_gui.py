@@ -1022,7 +1022,7 @@ class App(ctk.CTk):
             # Lazy Imports
             import numpy as np
             from autokey_tool.audio_engine import AudioEngine
-            from autokey_tool.dsp_pipeline import KeyDetector
+            from autokey_tool.key_detector_improved import KeyDetector
             
             # Initialize components
             self.audio_engine = AudioEngine(
@@ -1045,10 +1045,26 @@ class App(ctk.CTk):
             
             # Load devices
             self.loopback_devices = self.audio_engine.get_loopback_devices()
-            device_names = [d['name'][:30] for d in self.loopback_devices]
+            device_names = [d['name'][:40] for d in self.loopback_devices] # Increased length for better visibility
+            
             if device_names:
                 self.autokey_device_select.configure(values=device_names)
-                self.autokey_device_var.set(device_names[0])
+                
+                # Intelligent Auto-Select Logic
+                best_device = device_names[0]
+                priority_keywords = ["default", "speaker", "stereo mix", "what u hear", "loopback"]
+                
+                found_priority = False
+                for keyword in priority_keywords:
+                    for name in device_names:
+                        if keyword.lower() in name.lower():
+                            best_device = name
+                            found_priority = True
+                            print(f"[Auto-Key] Auto-selected device: {best_device}")
+                            break
+                    if found_priority: break
+                
+                self.autokey_device_var.set(best_device)
             
             self.autokey_loaded = True
             print(f"[Auto-Key] Successfully loaded. Found {len(self.loopback_devices)} devices.")
@@ -1109,7 +1125,7 @@ class App(ctk.CTk):
             device_id = None
             if self.loopback_devices:
                 for dev in self.loopback_devices:
-                    if dev['name'][:30] == selected_name:
+                    if dev['name'][:40] == selected_name:
                         device_id = dev['id']
                         break
             
