@@ -68,3 +68,5 @@ Thumbs.db
 dist/*.png
 dist/*.jpg
 dist/*.ico
+electron-key-detector/node_modules/
+electron-key-detector/package-lock.json
