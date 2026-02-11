@@ -70,3 +70,7 @@ dist/*.jpg
 dist/*.ico
 electron-key-detector/node_modules/
 electron-key-detector/package-lock.json
+
+# Agent data (Antigravity)
+.agent/
+.gemini/
