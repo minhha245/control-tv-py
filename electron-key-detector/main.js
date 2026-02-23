@@ -35,7 +35,7 @@ function createWindow() {
     }
 }
 
-// Connect to Python bridge
+// Connect to Python bridge (optional - for Cubase integration)
 function connectToPython() {
     pythonSocket = new net.Socket();
 
@@ -45,16 +45,14 @@ function connectToPython() {
     });
 
     pythonSocket.on('error', (err) => {
-        console.log('Python bridge not available:', err.message);
+        console.log('Python bridge not available (optional)');
         mainWindow?.webContents.send('python-status', { connected: false });
-        // Retry connection after 5 seconds
-        setTimeout(connectToPython, 5000);
+        // Don't retry - it's optional
     });
 
     pythonSocket.on('close', () => {
         console.log('Python bridge disconnected');
         mainWindow?.webContents.send('python-status', { connected: false });
-        setTimeout(connectToPython, 5000);
     });
 
     pythonSocket.on('data', (data) => {
@@ -115,4 +113,110 @@ app.on('window-all-closed', () => {
 // Quit when Python bridge is closed by user
 ipcMain.on('quit-app', () => {
     app.quit();
+});
+
+
+// YouTube download and key detection
+ipcMain.handle('download-and-detect-youtube', async (event, url) => {
+    return new Promise((resolve) => {
+        const http = require('http');
+        
+        const postData = JSON.stringify({ url: url });
+        
+        const options = {
+            hostname: '127.0.0.1',
+            port: 5001,
+            path: '/download-and-detect',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            },
+            timeout: 120000, // 2 minutes
+            family: 4
+        };
+        
+        console.log('Requesting YouTube download and key detection:', url);
+        
+        const req = http.request(options, (res) => {
+            let data = '';
+            
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+            
+            res.on('end', () => {
+                try {
+                    const result = JSON.parse(data);
+                    
+                    if (res.statusCode === 200) {
+                        console.log('YouTube detected:', result.key, result.scale);
+                        resolve(result);
+                    } else {
+                        console.error('YouTube detection error:', result.error);
+                        resolve({ error: result.error });
+                    }
+                } catch (e) {
+                    console.error('Failed to parse response:', e);
+                    resolve({ error: 'Parse error' });
+                }
+            });
+        });
+        
+        req.on('error', (err) => {
+            console.error('Error downloading YouTube:', err);
+            resolve({ error: err.message });
+        });
+        
+        req.on('timeout', () => {
+            console.error('YouTube download timeout');
+            req.destroy();
+            resolve({ error: 'Timeout' });
+        });
+        
+        req.write(postData);
+        req.end();
+    });
+});
+
+// Check YouTube server
+ipcMain.handle('check-youtube-server', async () => {
+    return new Promise((resolve) => {
+        const http = require('http');
+        
+        const options = {
+            hostname: '127.0.0.1',
+            port: 5001,
+            path: '/health',
+            method: 'GET',
+            timeout: 2000,
+            family: 4
+        };
+        
+        const req = http.get(options, (res) => {
+            let data = '';
+            
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+            
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    resolve(json.status === 'ok');
+                } catch (e) {
+                    resolve(false);
+                }
+            });
+        });
+        
+        req.on('error', () => {
+            resolve(false);
+        });
+        
+        req.on('timeout', () => {
+            req.destroy();
+            resolve(false);
+        });
+    });
 });

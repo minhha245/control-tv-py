@@ -1,76 +1,81 @@
-# =========================
-# PYTHON CACHE
-# =========================
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 *.so
-*.dll
-
-# =========================
-# VIRTUAL ENV
-# =========================
-venv/
-.env/
-.env.*
-
-# =========================
-# PYINSTALLER
-# =========================
+.Python
 build/
+develop-eggs/
 dist/
-*.spec
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# PyInstaller cache
-*.manifest
-*.log
+# Virtual Environment
+venv/
+ENV/
+env/
 
-# =========================
-# EXECUTABLE OUTPUT
-# =========================
-*.exe
-*.msi
-
-# =========================
-# CONFIG / RUNTIME FILES
-# =========================
-config.json
-autokey_coords.json
-license.dat
-
-# =========================
-# VERSION FILE (build auto)
-# =========================
-version.txt
-
-# =========================
-# OS / IDE
-# =========================
-.DS_Store
-Thumbs.db
-
+# IDE
 .vscode/
 .idea/
-*.iml
-
-# =========================
-# TEMP / LOG
-# =========================
-*.tmp
-*.bak
 *.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project specific
+license.dat
+config.json
+autokey_coords.json
+youtube_tabs.json
+
+# Temporary files
+temp_youtube/
 *.log
+*.tmp
 
-# =========================
-# MEDIA / ASSETS BUILD COPY
-# =========================
-dist/*.png
-dist/*.jpg
-dist/*.ico
-electron-key-detector/node_modules/
-electron-key-detector/package-lock.json
+# Node modules (for Electron projects)
+node_modules/
+package-lock.json
 
-# Agent data (Antigravity)
-.agent/
-.gemini/
+# Backup files
+*.backup
+*.bak
+*_backup.*
+
+# Test files
+test_*.py
+debug_*.py
+
+# Audio files
+*.mp3
+*.m4a
+*.webm
+*.opus
+*.ogg
+*.wav
+*.flac
+
+# Build artifacts
+*.exe
+*.app
+*.dmg
+*.deb
+*.rpm
+
+# Documentation build
+docs/_build/

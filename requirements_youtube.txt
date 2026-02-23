@@ -1,0 +1,16 @@
+# YouTube Integration Requirements
+yt-dlp>=2023.12.30
+requests>=2.31.0
+
+# Selenium for URL monitoring
+selenium>=4.15.0
+
+# Audio processing (for reading various formats)
+soundfile>=0.12.1
+audioread>=3.0.0
+
+# Already required by essentia-key-detector
+flask>=3.0.0
+flask-cors>=4.0.0
+librosa>=0.10.1
+numpy>=1.26.2

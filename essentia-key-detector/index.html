@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net https://fonts.googleapis.com https://fonts.gstatic.com blob:; media-src * blob:; img-src * data:; font-src * data:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net blob:;">
+    <title>Essentia Key Detector</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo">
+                <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <circle cx="16" cy="16" r="14" stroke="url(#logo-grad)" stroke-width="2" />
+                    <path d="M11 20V12L16 8L21 12V20" stroke="url(#logo-grad)" stroke-width="2" stroke-linecap="round"
+                        stroke-linejoin="round" />
+                    <path d="M11 16H21" stroke="url(#logo-grad)" stroke-width="2" stroke-linecap="round" />
+                    <defs>
+                        <linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32">
+                            <stop stop-color="#8B5CF6" />
+                            <stop offset="1" stop-color="#D946EF" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="logo-text">Essentia Key Detector</span>
+            </div>
+            <div class="header-right">
+                <span class="version-badge">v1.0.0</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Left Panel: Upload & File List -->
+            <section class="upload-section">
+                <!-- Drop Zone -->
+                <div class="drop-zone" id="dropZone">
+                    <div class="drop-zone-content">
+                        <div class="drop-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
+                        </div>
+                        <p class="drop-text">Kéo thả file audio vào đây</p>
+                        <p class="drop-subtext">hoặc</p>
+                        <button class="btn btn-primary" id="browseBtn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                            </svg>
+                            Chọn File
+                        </button>
+                        <p class="drop-formats">MP3, WAV, FLAC, OGG, AAC, M4A, AIFF</p>
+                    </div>
+                </div>
+
+                <!-- Progress Bar (hidden by default) -->
+                <div class="progress-container" id="progressContainer" style="display: none;">
+                    <div class="progress-info">
+                        <span id="progressLabel">Đang phân tích...</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                </div>
+
+                <!-- File History List -->
+                <div class="file-history">
+                    <div class="file-history-header">
+                        <h3>Lịch sử phân tích</h3>
+                        <button class="btn btn-ghost btn-sm" id="clearHistoryBtn" title="Xoá lịch sử">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path
+                                    d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="file-list" id="fileList">
+                        <div class="file-list-empty">Chưa có file nào được phân tích</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Panel: Key Detection Result -->
+            <section class="result-section">
+                <div class="section-header">
+                    <h2>Kết quả phát hiện</h2>
+                </div>
+
+                <div class="result-container">
+                    <!-- Key Display -->
+                    <div class="key-display">
+                        <div class="key-ring">
+                            <div class="key-value" id="keyValue">--</div>
+                        </div>
+                        <div class="scale-badge" id="scaleBadge">
+                            <span id="scaleValue">Đang chờ...</span>
+                        </div>
+                    </div>
+
+                    <!-- File Info -->
+                    <div class="file-info" id="fileInfo" style="display: none;">
+                        <div class="file-info-item">
+                            <span class="file-info-label">File</span>
+                            <span class="file-info-value" id="fileName">-</span>
+                        </div>
+                        <div class="file-info-item">
+                            <span class="file-info-label">Kích thước</span>
+                            <span class="file-info-value" id="fileSize">-</span>
+                        </div>
+                        <div class="file-info-item">
+                            <span class="file-info-label">Thời gian phân tích</span>
+                            <span class="file-info-value" id="analysisTime">-</span>
+                        </div>
+                    </div>
+
+                    <!-- Confidence Meter -->
+                    <div class="confidence-section">
+                        <div class="confidence-header">
+                            <span>Confidence</span>
+                            <span id="confidenceValue">0%</span>
+                        </div>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" id="confidenceFill" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <!-- Chroma Visualization -->
+                    <div class="chroma-section">
+                        <h3>Chroma Profile</h3>
+                        <div class="chroma-bars" id="chromaBars">
+                            <div class="chroma-bar" data-note="C"><span>C</span></div>
+                            <div class="chroma-bar" data-note="C#"><span>C#</span></div>
+                            <div class="chroma-bar" data-note="D"><span>D</span></div>
+                            <div class="chroma-bar" data-note="D#"><span>D#</span></div>
+                            <div class="chroma-bar" data-note="E"><span>E</span></div>
+                            <div class="chroma-bar" data-note="F"><span>F</span></div>
+                            <div class="chroma-bar" data-note="F#"><span>F#</span></div>
+                            <div class="chroma-bar" data-note="G"><span>G</span></div>
+                            <div class="chroma-bar" data-note="G#"><span>G#</span></div>
+                            <div class="chroma-bar" data-note="A"><span>A</span></div>
+                            <div class="chroma-bar" data-note="A#"><span>A#</span></div>
+                            <div class="chroma-bar" data-note="B"><span>B</span></div>
+                        </div>
+                    </div>
+
+                    <!-- Alternative Keys -->
+                    <div class="alt-keys-section" id="altKeysSection" style="display: none;">
+                        <h3>Key thay thế</h3>
+                        <div class="alt-keys-list" id="altKeysList"></div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="app-footer">
+            <span>Hau Studio © 2026</span>
+            <span class="footer-powered">Powered by Essentia.js</span>
+        </footer>
+    </div>
+
+    <!-- Essentia.js WASM -->
+    <script src="https://unpkg.com/essentia.js@0.1.3/dist/essentia-wasm.web.js"></script>
+    <script src="https://unpkg.com/essentia.js@0.1.3/dist/essentia.js-core.js"></script>
+    <script src="app.js"></script>
+</body>
+
+</html>

@@ -657,20 +657,27 @@ class KeyDetectorEngine {
 
 class UIController {
     constructor() {
+        console.log('🚀 UIController constructor called');
         this.engine = new KeyDetectorEngine();
         this.detectionHistory = [];
         this.maxHistory = 20;
         this.isPythonConnected = false;
 
+        console.log('Initializing UI elements...');
         this.initializeElements();
+        console.log('Binding events...');
         this.bindEvents();
+        console.log('Initializing engine...');
         this.initializeEngine();
 
         // Load sources initially
         setTimeout(() => this.loadAudioSources(), 1000);
+        console.log('✅ UIController initialized successfully');
     }
 
     initializeElements() {
+        console.log('📋 Initializing UI elements...');
+        
         // Status elements
         this.pythonStatusDot = document.querySelector('#pythonStatus .status-dot');
         this.audioStatusDot = document.querySelector('#audioStatus .status-dot');
@@ -680,6 +687,8 @@ class UIController {
 
         // YouTube webview and navigation
         this.youtubeWebview = document.getElementById('youtubeWebview');
+        console.log('YouTube webview element:', this.youtubeWebview ? '✅ Found' : '❌ NOT FOUND');
+        
         this.backBtn = document.getElementById('backBtn');
         this.forwardBtn = document.getElementById('forwardBtn');
         this.refreshBtn = document.getElementById('refreshBtn');
@@ -698,6 +707,8 @@ class UIController {
         this.sendToCubaseBtn = document.getElementById('sendToCubaseBtn');
         this.lastSentInfo = document.getElementById('lastSentInfo');
         this.historyList = document.getElementById('historyList');
+        
+        console.log('✅ UI elements initialized');
     }
 
     bindEvents() {
@@ -732,6 +743,18 @@ class UIController {
                     this.youtubeWebview.src = 'https://www.youtube.com';
                 }
             });
+        }
+
+        // Detect key from YouTube button
+        const detectYouTubeBtn = document.getElementById('detectYouTubeBtn');
+        if (detectYouTubeBtn) {
+            console.log('✅ Detect YouTube button found and event listener attached');
+            detectYouTubeBtn.addEventListener('click', () => {
+                console.log('🔘 Detect YouTube button clicked!');
+                this.detectKeyFromYouTube();
+            });
+        } else {
+            console.error('❌ Detect YouTube button NOT found in DOM');
         }
 
         // Detection button
@@ -990,3 +1013,113 @@ document.addEventListener('DOMContentLoaded', () => {
     window.app = new UIController();
     console.log('Key Detector initialized');
 });
+
+
+    async detectKeyFromYouTube() {
+        console.log('🎵 detectKeyFromYouTube() called!');
+        
+        // Get the button and disable it during processing
+        const detectBtn = document.getElementById('detectYouTubeBtn');
+        if (detectBtn) {
+            detectBtn.disabled = true;
+            detectBtn.textContent = 'Processing...';
+        }
+        
+        try {
+            console.log('=== YouTube Key Detection Started ===');
+            console.log('Step 1: Getting webview reference...');
+            console.log('Webview element:', this.youtubeWebview);
+            
+            if (!this.youtubeWebview) {
+                throw new Error('YouTube webview not found');
+            }
+            
+            // Get current URL from webview
+            console.log('Step 2: Getting URL from webview...');
+            const currentUrl = this.youtubeWebview.getURL();
+            console.log('Current URL:', currentUrl);
+            
+            if (!currentUrl) {
+                throw new Error('Could not get URL from webview');
+            }
+            
+            if (!currentUrl.includes('youtube.com/watch')) {
+                throw new Error('Not a YouTube video URL. Please navigate to a video first.');
+            }
+
+            console.log('Step 3: Checking YouTube server...');
+            console.log('Calling window.electronAPI.checkYouTubeServer()...');
+
+            // Check if YouTube server is running
+            const serverReady = await window.electronAPI.checkYouTubeServer();
+            console.log('YouTube server ready:', serverReady);
+            
+            if (!serverReady) {
+                throw new Error('YouTube server not running on port 5001.\n\nPlease run: python youtube_server.py');
+            }
+
+            // Show loading state
+            console.log('Step 4: Updating UI to loading state...');
+            this.keyValue.textContent = '...';
+            this.scaleValue.textContent = 'Downloading...';
+            this.confidenceValue.textContent = '0%';
+
+            // Download and detect
+            console.log('Step 5: Sending request to download and detect...');
+            console.log('URL being sent:', currentUrl);
+            const result = await window.electronAPI.downloadAndDetectYouTube(currentUrl);
+            console.log('Step 6: Result received:', JSON.stringify(result, null, 2));
+
+            if (result.error) {
+                console.error('Detection error:', result.error);
+                throw new Error(result.error);
+            }
+
+            if (!result.key || !result.scale) {
+                throw new Error('Invalid result from server: missing key or scale');
+            }
+
+            console.log('Step 7: YouTube detection successful!');
+            console.log('Key:', result.key);
+            console.log('Scale:', result.scale);
+            console.log('Confidence:', result.confidence);
+
+            // Update display
+            console.log('Step 8: Updating key display...');
+            this.updateKeyDisplay({
+                key: result.key,
+                mode: result.scale,
+                confidence: result.confidence / 100,
+                stability: 1.0,
+                isLocked: true
+            });
+
+            // Add to history
+            console.log('Step 9: Adding to history...');
+            this.addToHistory(result.key, result.scale, result.confidence / 100);
+
+            // Show success message
+            console.log('=== YouTube Key Detection Complete ===');
+            alert(`✅ Detected: ${result.key} ${result.scale}\n\nTitle: ${result.title}\nConfidence: ${result.confidence}%`);
+
+        } catch (err) {
+            console.error('=== YouTube Detection Error ===');
+            console.error('Error:', err);
+            console.error('Error message:', err.message);
+            console.error('Stack:', err.stack);
+            alert('❌ Error: ' + err.message);
+            this.keyValue.textContent = '--';
+            this.scaleValue.textContent = 'Error';
+        } finally {
+            // Re-enable button
+            if (detectBtn) {
+                detectBtn.disabled = false;
+                detectBtn.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18l6-6-6-6"/>
+                    </svg>
+                    Detect Key
+                `;
+            }
+        }
+    }

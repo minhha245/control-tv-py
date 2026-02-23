@@ -11,6 +11,7 @@ from typing import Optional
 try:
     import ttkbootstrap as ttk
     from ttkbootstrap.constants import *
+    from tkinter import filedialog, messagebox
 except ImportError:
     print("Installing ttkbootstrap...")
     import subprocess
@@ -60,10 +61,10 @@ class AutoKeyApp:
         # Initialize improved KeyDetector with optimal settings
         self.key_detector = KeyDetector(
             sample_rate=44100,  # Will be updated when audio starts
-            short_history=8,    # Fast response (~2.5 seconds)
-            long_history=20,    # Stability buffer (~6-7 seconds)
-            confidence_threshold=0.12,  # Slightly lower for better detection
-            min_rms_threshold=0.001,
+            short_history=6,    # Faster initial response (~2 seconds)
+            long_history=24,    # More stability buffer (~8 seconds)
+            confidence_threshold=0.10,  # Lower threshold for better sensitivity
+            min_rms_threshold=0.0005,   # More sensitive to quiet signals
             use_hpss=True,
         )
 
@@ -134,6 +135,15 @@ class AutoKeyApp:
             bootstyle="success",
         )
         self.start_btn.pack(fill=X)
+        
+        # File upload button
+        self.upload_btn = ttk.Button(
+            btn_frame,
+            text="📂 UPLOAD AUDIO FILE",
+            command=self._detect_file_dialog,
+            bootstyle="info-outline",
+        )
+        self.upload_btn.pack(fill=X, pady=(10, 0))
 
         # Confidence meter frame with label
         conf_container = ttk.Frame(main_frame)
@@ -234,6 +244,77 @@ class AutoKeyApp:
         self.confidence_bar["value"] = 0
         self.conf_percent_label.configure(text="0%")
         self.lock_label.configure(text="🔓 Stopped")
+
+    def _detect_file_dialog(self):
+        """Open file dialog and start detection in a background thread."""
+        if self.is_running:
+            self._stop_listening()
+        
+        file_path = filedialog.askopenfilename(
+            title="Select Audio File",
+            filetypes=[
+                ("Audio Files", "*.mp3 *.wav *.flac *.m4a *.ogg *.aac"),
+                ("All Files", "*.*")
+            ]
+        )
+        
+        if file_path:
+            threading.Thread(target=self._process_file, args=(file_path,), daemon=True).start()
+
+    def _process_file(self, file_path):
+        """Process an audio file and update UI (runs in background thread)."""
+        import os
+        import soundfile
+        import librosa
+        filename = os.path.basename(file_path)
+        
+        try:
+            # Update UI to loading state
+            self.root.after(0, lambda: self.status_label.configure(text=f"● Loading: {filename[:20]}...", bootstyle="info"))
+            self.root.after(0, lambda: self.key_label.configure(text="..."))
+            self.root.after(0, lambda: self.mode_label.configure(text="Analyzing file..."))
+            self.root.after(0, lambda: self.upload_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.start_btn.configure(state="disabled"))
+            
+            # Load audio using binary stream approach (more robust for Unicode/Windows)
+            try:
+                with open(file_path, 'rb') as f:
+                    info = soundfile.info(f)
+                    sr = info.samplerate
+                    f.seek(0)
+                    y, _ = soundfile.read(f, frames=int(sr * 180))
+                    
+                    if len(y.shape) > 1:
+                        y = y.mean(axis=1)
+            except Exception as sf_err:
+                print(f"[Error] Soundfile failed: {sf_err}, falling back to librosa...")
+                y, sr = librosa.load(file_path, sr=None, duration=180)
+            
+            # Update sample rate for detector
+            self.key_detector.sample_rate = sr
+            self.key_detector.reset()
+            
+            # Detect
+            key, mode, conf, _ = self.key_detector.detect_static_audio(y)
+            
+            # Update UI with results
+            if key and mode:
+                self.root.after(0, lambda: self._update_display(key, mode, conf, 1.0))
+                self.root.after(0, lambda: self.status_label.configure(text=f"● Detected: {filename[:20]}", bootstyle="success"))
+                self.root.after(0, lambda: self.lock_label.configure(text="✅ File Detection Done", bootstyle="success"))
+            else:
+                self.root.after(0, lambda: self.status_label.configure(text="● Detection Failed", bootstyle="danger"))
+                self.root.after(0, lambda: self.mode_label.configure(text="Could not detect key"))
+
+        except Exception as e:
+            print(f"[Error] File processing: {e}")
+            import traceback
+            traceback.print_exc()
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Failed to process audio file:\n{str(e)}"))
+            self.root.after(0, lambda: self.status_label.configure(text="● Error loading file", bootstyle="danger"))
+        finally:
+            self.root.after(0, lambda: self.upload_btn.configure(state="normal"))
+            self.root.after(0, lambda: self.start_btn.configure(state="normal"))
 
     def _analysis_loop(self):
         """Main analysis loop running in separate thread."""

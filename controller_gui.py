@@ -10,8 +10,26 @@ import hashlib
 import tkinter.messagebox
 import tkinter.filedialog
 from ctypes import wintypes
+import subprocess
+import webbrowser
+import requests
+import re
+from urllib.parse import urlparse, parse_qs
 
 import sys
+
+# Selenium imports for URL monitoring
+selenium_available = False
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    selenium_available = True
+except ImportError:
+    print("[Selenium] Not installed. Install with: pip install selenium")
 
 # Global flag for Auto-Key
 AUTOKEY_AVAILABLE = True # We check availability dynamically later
@@ -315,6 +333,16 @@ class App(ctk.CTk):
         self.loopback_devices = []
         self.autokey_loaded = False
         
+        # Essentia Key Detector state
+        self.essentia_server_process = None
+        self.essentia_server_port = 5000
+        self.youtube_browser = None  # Selenium browser for monitoring
+        self.youtube_monitor_thread = None  # URL monitoring thread
+        self.youtube_monitor_active = False  # Monitoring flag
+        self.youtube_panel = None  # Control panel window
+        self.last_youtube_url = None  # Track last detected URL
+        self.auto_detect_enabled = False  # Auto-detect flag
+        
         # We will initialize loopback_devices list separately or lazily
         # For now, we'll try to get devices without loading heavy DSP libs if possible
         # but usually AudioEngine needs to be loaded first. Let's make it fully lazy.
@@ -325,6 +353,7 @@ class App(ctk.CTk):
 
         self.load_settings()
         self.load_autokey_coords()
+        self.start_essentia_server()
         self.after(1000, self.open_saved_project)
 
     def open_saved_project(self):
@@ -346,7 +375,8 @@ class App(ctk.CTk):
             ("NHẠC", self.col_btn_green, "MUTE_MUSIC"),
             ("MIC", self.col_btn_green, "MUTE_MIC"),
             ("VANG", self.col_btn_red, "VANG_FX"),
-            ("AUTO-KEY", "#00bcd4", "AUTO_KEY_DETECT"),  # Nút Auto-Key mới
+            ("AUTO-KEY", "#00bcd4", "AUTO_KEY_DETECT"),
+            ("YOUTUBE", "#ff0000", "YOUTUBE_BROWSER"),  # Nút YouTube mới
             ("CÀI ĐẶT", "#1f77b4", "SETTINGS"),
             ("LƯU", self.col_btn_yellow, "SAVE")
         ]
@@ -370,6 +400,8 @@ class App(ctk.CTk):
                 cmd = self.open_settings_popup
             elif cc_key == "AUTO_KEY_DETECT":
                 cmd = self.toggle_autokey_detection
+            elif cc_key == "YOUTUBE_BROWSER":
+                cmd = self.open_youtube_browser
 
             btn = ctk.CTkButton(
                 frame, text=text, fg_color=color,
@@ -459,6 +491,20 @@ class App(ctk.CTk):
         
         self.autokey_status_label = ctk.CTkLabel(autokey_header, text="● OFF", font=("Arial", 8), text_color="#d32f2f")
         self.autokey_status_label.pack(side="right")
+        
+        # Audio file upload button
+        self.upload_audio_btn = ctk.CTkButton(
+            autokey_header, 
+            text="📁", 
+            width=20, 
+            height=20, 
+            fg_color="transparent",
+            text_color="#00bcd4",
+            hover_color="#333",
+            font=("Arial", 12),
+            command=self.detect_audio_file
+        )
+        self.upload_audio_btn.pack(side="right", padx=5)
 
         key_display_frame = ctk.CTkFrame(autokey_frame, fg_color="transparent")
         key_display_frame.pack(pady=2)
@@ -1332,8 +1378,384 @@ class App(ctk.CTk):
             else:
                 self.detected_scale_label.configure(text="Đang phân tích...")
 
+    # === ESSENTIA KEY DETECTOR INTEGRATION ===
+    def start_essentia_server(self):
+        """Start Essentia Python server in background."""
+        try:
+            server_path = os.path.join("essentia-key-detector", "audio_server.py")
+            if not os.path.exists(server_path):
+                print("[Essentia] Server script not found, skipping...")
+                return
+            
+            print("[Essentia] Starting audio server...")
+            self.essentia_server_process = subprocess.Popen(
+                ["python", server_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            )
+            
+            # Wait for server to start
+            time.sleep(2)
+            
+            # Check if server is running
+            if self.check_essentia_server():
+                print("[Essentia] Server started successfully")
+            else:
+                print("[Essentia] Server failed to start")
+                
+        except Exception as e:
+            print(f"[Essentia] Error starting server: {e}")
+    
+    def stop_essentia_server(self):
+        """Stop Essentia Python server."""
+        if self.essentia_server_process:
+            try:
+                print("[Essentia] Stopping audio server...")
+                self.essentia_server_process.terminate()
+                self.essentia_server_process.wait(timeout=5)
+                print("[Essentia] Server stopped")
+            except Exception as e:
+                print(f"[Essentia] Error stopping server: {e}")
+                try:
+                    self.essentia_server_process.kill()
+                except:
+                    pass
+    
+    def check_essentia_server(self):
+        """Check if Essentia server is running."""
+        try:
+            response = requests.get(f"http://127.0.0.1:{self.essentia_server_port}/health", timeout=2)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def detect_key_essentia(self, file_path):
+        """Detect key using Essentia server."""
+        try:
+            response = requests.post(
+                f"http://127.0.0.1:{self.essentia_server_port}/detect-key",
+                json={"filePath": file_path},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return result.get("key"), result.get("scale"), result.get("confidence", 0)
+            else:
+                print(f"[Essentia] Detection failed: {response.text}")
+                return None, None, 0
+                
+        except Exception as e:
+            print(f"[Essentia] Error detecting key: {e}")
+            return None, None, 0
+    
+    # === YOUTUBE BROWSER INTEGRATION ===
+    def open_youtube_browser(self):
+        """Open YouTube in Selenium browser with auto URL monitoring."""
+        if not selenium_available:
+            tkinter.messagebox.showerror(
+                "Lỗi",
+                "Chưa cài đặt Selenium!\n\nVui lòng cài đặt:\npip install selenium"
+            )
+            return
+        
+        # Check if already running
+        if self.youtube_browser and self.youtube_monitor_active:
+            tkinter.messagebox.showinfo(
+                "Thông báo",
+                "YouTube Auto Detector đang chạy!\n\nClick vào video để tự động phát hiện key."
+            )
+            return
+        
+        # Start browser in thread
+        threading.Thread(target=self._start_youtube_browser_worker, daemon=True).start()
+    
+    def _start_youtube_browser_worker(self):
+        """Worker thread to start YouTube browser."""
+        try:
+            if self.youtube_browser:
+                return
+            
+            print("[YouTube Browser] Starting Chrome...")
+            
+            # Setup Chrome options
+            chrome_options = Options()
+            chrome_options.add_argument("--start-maximized")
+            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+            chrome_options.add_experimental_option('useAutomationExtension', True)
+            
+            # Try to find Chrome/Brave
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+                r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+            ]
+            
+            chrome_binary = None
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    chrome_binary = path
+                    break
+            
+            if chrome_binary:
+                chrome_options.binary_location = chrome_binary
+                print(f"[YouTube Browser] Using browser: {chrome_binary}")
+            
+            # Create driver
+            self.youtube_browser = webdriver.Chrome(options=chrome_options)
+            
+            # Open YouTube homepage
+            self.youtube_browser.get("https://www.youtube.com")
+            
+            print("[YouTube Browser] Opened YouTube")
+            
+            # Auto-enable monitoring
+            self.auto_detect_enabled = True
+            self.youtube_monitor_active = True
+            
+            # Start monitoring thread
+            self.youtube_monitor_thread = threading.Thread(
+                target=self._monitor_youtube_url,
+                daemon=True
+            )
+            self.youtube_monitor_thread.start()
+            
+            # Show notification
+            self.after(0, lambda: tkinter.messagebox.showinfo(
+                "YouTube Auto Detector",
+                "✅ Đã bật tự động phát hiện!\n\n"
+                "Click vào video YouTube để tự động phát hiện key.\n\n"
+                "Kết quả sẽ hiển thị trên panel AUTO-KEY."
+            ))
+            
+        except Exception as e:
+            print(f"[YouTube Browser] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            self.after(0, lambda: tkinter.messagebox.showerror(
+                "Lỗi",
+                f"Không thể mở trình duyệt:\n{e}\n\nVui lòng cài đặt:\npip install selenium"
+            ))
+    
+    def _monitor_youtube_url(self):
+        """Monitor YouTube URL changes and auto-detect."""
+        print("[YouTube Monitor] Started")
+        
+        while self.youtube_monitor_active and self.youtube_browser:
+            try:
+                if not self.auto_detect_enabled:
+                    time.sleep(1)
+                    continue
+                
+                current_url = self.youtube_browser.current_url
+                
+                # Check if it's a video URL and different from last
+                if ("youtube.com/watch" in current_url or "youtu.be/" in current_url):
+                    if current_url != self.last_youtube_url:
+                        print(f"[YouTube Monitor] New video detected: {current_url}")
+                        self.last_youtube_url = current_url
+                        
+                        # Update status
+                        self.after(0, lambda: self.autokey_status_label.configure(
+                            text="● YOUTUBE DETECTED",
+                            text_color="#ff0000"
+                        ))
+                        
+                        # Wait a bit for video to load
+                        time.sleep(2)
+                        
+                        # Start detection
+                        self._detect_youtube_url(current_url)
+                        
+                        # Wait before next check
+                        time.sleep(5)
+                
+                time.sleep(1)  # Check every second
+                
+            except Exception as e:
+                print(f"[YouTube Monitor] Error: {e}")
+                time.sleep(2)
+        
+        print("[YouTube Monitor] Stopped")
+    
+    def _detect_youtube_url(self, url):
+        """Detect key from YouTube URL."""
+        try:
+            # Update status
+            self.after(0, lambda: self.autokey_status_label.configure(text="● DOWNLOADING...", text_color="#ffa726"))
+            self.after(0, lambda: self.detected_key_label.configure(text="..."))
+            self.after(0, lambda: self.detected_scale_label.configure(text="Đang tải..."))
+            
+            # Check if yt-dlp is available
+            try:
+                import yt_dlp
+            except ImportError:
+                self.after(0, lambda: tkinter.messagebox.showerror(
+                    "Lỗi", 
+                    "Chưa cài đặt yt-dlp!\n\nVui lòng cài đặt:\npip install yt-dlp"
+                ))
+                self.after(0, lambda: self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f"))
+                return
+            
+            # Create temp directory
+            temp_dir = os.path.join(os.path.dirname(__file__), "temp_youtube")
+            os.makedirs(temp_dir, exist_ok=True)
+            
+            print(f"[YouTube] Downloading audio: {url}")
+            
+            # Download audio directly using yt-dlp CLI (simple and reliable)
+            output_template = os.path.join(temp_dir, "%(id)s.%(ext)s")
+            
+            try:
+                # Use CLI with timeout - Download opus/webm (native YouTube format, no conversion)
+                result = subprocess.run([
+                    sys.executable, "-m", "yt_dlp",
+                    "--format", "bestaudio",
+                    "--no-playlist",
+                    "--output", output_template,
+                    "--no-warnings",
+                    url
+                ], capture_output=True, text=True, timeout=120)  # 2 minutes timeout
+                
+                if result.returncode != 0:
+                    raise Exception(f"Download failed: {result.stderr}")
+                
+                print("[YouTube] Download completed")
+                
+            except subprocess.TimeoutExpired:
+                raise Exception("Download timeout (quá 2 phút)")
+            except Exception as e:
+                raise Exception(f"Download error: {e}")
+            
+            # Find downloaded file
+            audio_files = []
+            for ext in ['.m4a', '.webm', '.mp3', '.opus', '.ogg']:
+                audio_files.extend([f for f in os.listdir(temp_dir) if f.endswith(ext)])
+            
+            if not audio_files:
+                raise Exception("Không tìm thấy file audio đã tải")
+            
+            audio_path = os.path.join(temp_dir, audio_files[0])
+            print(f"[YouTube] Audio file: {audio_path}")
+            
+            self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING...", text_color="#ffa726"))
+            self.after(0, lambda: self.detected_scale_label.configure(text="Đang phân tích..."))
+            
+            # Detect key - Try Essentia first, fallback to librosa
+            key = None
+            scale = None
+            confidence = 0
+            
+            if self.check_essentia_server():
+                print("[YouTube] Trying Essentia server...")
+                key, scale, confidence = self.detect_key_essentia(audio_path)
+            
+            # If Essentia failed or not available, use fallback
+            if not key or not scale:
+                print("[YouTube] Using librosa fallback...")
+                key, scale, confidence = self._detect_key_fallback(audio_path)
+            
+            # Clean up
+            try:
+                os.remove(audio_path)
+                print(f"[YouTube] Cleaned up: {audio_path}")
+            except:
+                pass
+            
+            if key and scale:
+                self.after(0, lambda: self._update_autokey_display(key, scale, confidence / 100, 1.0))
+                self.after(0, lambda: self.autokey_status_label.configure(text="● YOUTUBE DONE", text_color="#4caf50"))
+                self.send_autokey_midi(key, scale)
+                
+                print(f"[YouTube] Detected: {key} {scale} ({confidence}%)")
+            else:
+                self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
+                print("[YouTube] Detection failed")
+                
+        except Exception as e:
+            print(f"[YouTube] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            self.after(0, lambda: self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f"))
+    
+    def save_youtube_tabs(self):
+        """Deprecated - kept for compatibility."""
+        pass
+    
+    def load_youtube_tabs(self):
+        """Deprecated - kept for compatibility."""
+        pass
+    
+    def _detect_key_fallback(self, audio_path):
+        """Fallback key detection using librosa."""
+        try:
+            import librosa
+            import numpy as np
+            
+            # Load audio
+            y, sr = librosa.load(audio_path, sr=22050, duration=30)
+            
+            # Extract chroma
+            chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=2048)
+            chroma_avg = np.mean(chroma, axis=1)
+            
+            # Simple key detection (Krumhansl-Kessler)
+            NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+            KK_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+            KK_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+            
+            max_corr = -1
+            detected_key = 'C'
+            detected_scale = 'Major'
+            
+            for tonic in range(12):
+                major_profile = np.roll(KK_MAJOR, tonic)
+                major_corr = np.corrcoef(chroma_avg, major_profile)[0, 1]
+                
+                if major_corr > max_corr:
+                    max_corr = major_corr
+                    detected_key = NOTE_NAMES[tonic]
+                    detected_scale = 'Major'
+                
+                minor_profile = np.roll(KK_MINOR, tonic)
+                minor_corr = np.corrcoef(chroma_avg, minor_profile)[0, 1]
+                
+                if minor_corr > max_corr:
+                    max_corr = minor_corr
+                    detected_key = NOTE_NAMES[tonic]
+                    detected_scale = 'Minor'
+            
+            confidence = int(max(0, min(100, (max_corr + 1) * 50)))
+            
+            return detected_key, detected_scale, confidence
+            
+        except Exception as e:
+            print(f"[Fallback] Error: {e}")
+            return None, None, 0
+
     def on_closing(self):
         print("\n🛑 Đang bắt đầu quy trình tắt...")
+        
+        # Stop YouTube monitoring
+        self.youtube_monitor_active = False
+        self.auto_detect_enabled = False
+        
+        # Close YouTube browser
+        if self.youtube_browser:
+            try:
+                print("[YouTube Browser] Closing...")
+                self.youtube_browser.quit()
+            except:
+                pass
+        
+        # Stop Essentia server
+        self.stop_essentia_server()
         
         # Stop Auto-Key detection if running
         if self.autokey_running:
@@ -1414,6 +1836,96 @@ class App(ctk.CTk):
         print("👋 Đang đóng Tool...")
         self.destroy()
         os._exit(0)
+
+    def detect_audio_file(self):
+        """Open file dialog and detect key from audio file."""
+        if not self.autokey_loaded:
+            if not self.ensure_autokey_loaded():
+                return
+        
+        if self.autokey_running:
+            self.stop_autokey_detection()
+            
+        file_path = tkinter.filedialog.askopenfilename(
+            title="Chọn file âm thanh",
+            filetypes=[
+                ("Audio Files", "*.mp3 *.wav *.flac *.m4a *.ogg *.aac"),
+                ("All Files", "*.*")
+            ]
+        )
+        
+        if file_path:
+            threading.Thread(target=self._process_audio_file_worker, args=(file_path,), daemon=True).start()
+
+    def _process_audio_file_worker(self, file_path):
+        """Worker thread to process audio file."""
+        import os
+        import tempfile
+        import shutil
+        import librosa
+        filename = os.path.basename(file_path)
+        temp_path = None
+        
+        try:
+            self.after(0, lambda: self.autokey_status_label.configure(text="● LOADING FILE...", text_color="#ffa726"))
+            self.after(0, lambda: self.detected_key_label.configure(text="..."))
+            self.after(0, lambda: self.detected_scale_label.configure(text="Đang xử lý..."))
+            
+            # Load audio using a more robust binary stream approach
+            # This bypasses many Unicode path and backend issues on Windows
+            import soundfile
+            import io
+            
+            self.after(0, lambda: self.autokey_status_label.configure(text="● DECODING...", text_color="#ffa726"))
+            
+            try:
+                # Try reading directly with soundfile first (handles most MP3s in newer versions)
+                # We use a binary stream to ensure file handles are handled correctly
+                with open(file_path, 'rb') as f:
+                    # Note: soundfile.read can take a file-like object
+                    # We limit to approx 3 mins (sr * 180 samples)
+                    # But we need sr first, so we use soundfile.info
+                    info = soundfile.info(f)
+                    sr = info.samplerate
+                    f.seek(0)
+                    y, _ = soundfile.read(f, frames=int(sr * 180))
+                    
+                    # If it's multi-channel, convert to mono
+                    if len(y.shape) > 1:
+                        y = y.mean(axis=1)
+            except Exception as sf_err:
+                print(f"[Auto-Key] Soundfile failed: {sf_err}, falling back to librosa...")
+                # Fallback to librosa logic (which might still fail but we try)
+                y, sr = librosa.load(file_path, sr=None, duration=180)
+            
+            self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING...", text_color="#ffa726"))
+            
+            # Use the static detection method
+            self.key_detector.sample_rate = sr
+            self.key_detector.reset()
+            
+            key, mode, conf, proc_time = self.key_detector.detect_static_audio(y)
+            
+            if key and mode:
+                self.after(0, lambda: self._update_autokey_display(key, mode, conf, 1.0))
+                self.after(0, lambda: self.autokey_status_label.configure(text=f"● DONE ({proc_time:.1f}s)", text_color="#4caf50"))
+                # Send to MIDI
+                self.send_autokey_midi(key, mode)
+            else:
+                self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
+                self.after(0, lambda: self.detected_scale_label.configure(text="Không tìm thấy tone"))
+                
+        except Exception as e:
+            print(f"[Auto-Key] File error: {e}")
+            import traceback
+            traceback.print_exc()
+            self.after(0, lambda: tkinter.messagebox.showerror("Lỗi", f"Không thể xử lý file:\n{e}"))
+            self.after(0, lambda: self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f"))
+        finally:
+            # Clean up temp file
+            if temp_path and os.path.exists(temp_path):
+                try: os.remove(temp_path)
+                except: pass
 
 if __name__ == "__main__":
     app = App()

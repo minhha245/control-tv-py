@@ -1,0 +1,215 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    YouTube Key Detection - Flow Diagram                      ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 1. USER ACTION                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+                    User clicks "Detect Key" button
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 2. FRONTEND (app.js)                                                        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  detectKeyFromYouTube() method called                                       │
+│                                                                             │
+│  ✓ Get URL from webview                                                    │
+│  ✓ Validate it's a YouTube video URL                                       │
+│  ✓ Check server health (port 5001)                                         │
+│  ✓ Show loading state                                                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 3. IPC COMMUNICATION (preload.js → main.js)                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  window.electronAPI.downloadAndDetectYouTube(url)                          │
+│                                                                             │
+│  → ipcRenderer.invoke('download-and-detect-youtube', url)                  │
+│  → ipcMain.handle('download-and-detect-youtube', ...)                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 4. HTTP REQUEST (main.js)                                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  POST http://127.0.0.1:5001/download-and-detect                           │
+│  Body: { "url": "https://youtube.com/watch?v=..." }                       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 5. PYTHON SERVER (youtube_server.py)                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Flask endpoint: /download-and-detect                                      │
+│                                                                             │
+│  Step 1: Download audio with yt-dlp                                        │
+│          ├─ Uses ffmpeg to extract audio                                   │
+│          └─ Saves to temp file (.m4a)                                      │
+│                                                                             │
+│  Step 2: Load audio with librosa                                           │
+│          ├─ Load first 30 seconds                                          │
+│          ├─ Resample to 22050 Hz                                           │
+│          └─ Convert to mono                                                │
+│                                                                             │
+│  Step 3: Extract chroma features                                           │
+│          ├─ Use chroma_cqt (Constant-Q Transform)                          │
+│          ├─ hop_length=2048                                                │
+│          └─ Average across time                                            │
+│                                                                             │
+│  Step 4: Detect key (Krumhansl-Schmuckler)                                 │
+│          ├─ Normalize chroma vector                                        │
+│          ├─ Correlate with KK profiles (Major & Minor)                     │
+│          ├─ Test all 12 tonics                                             │
+│          └─ Return highest correlation                                     │
+│                                                                             │
+│  Step 5: Return JSON result                                                │
+│          {                                                                 │
+│            "title": "Song Name",                                           │
+│            "key": "G",                                                     │
+│            "scale": "Major",                                               │
+│            "confidence": 85,                                               │
+│            "alternatives": [...]                                           │
+│          }                                                                 │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 6. RESPONSE FLOW                                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Python → HTTP Response → main.js → IPC Response → app.js                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 7. UI UPDATE (app.js)                                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  ✓ Update key display (G Major)                                            │
+│  ✓ Update confidence meter (85%)                                           │
+│  ✓ Add to detection history                                                │
+│  ✓ Show success alert                                                      │
+│  ✓ Re-enable button                                                        │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                              CONSOLE LOGS                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Frontend (Electron DevTools Console):
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ 🔘 Detect YouTube button clicked!                                           │
+│ 🎵 detectKeyFromYouTube() called!                                           │
+│ === YouTube Key Detection Started ===                                       │
+│ Step 1: Getting webview reference...                                        │
+│ Webview element: [object HTMLWebViewElement]                                │
+│ Step 2: Getting URL from webview...                                         │
+│ Current URL: https://www.youtube.com/watch?v=dQw4w9WgXcQ                    │
+│ Step 3: Checking YouTube server...                                          │
+│ YouTube server ready: true                                                  │
+│ Step 4: Updating UI to loading state...                                     │
+│ Step 5: Sending request to download and detect...                           │
+│ Step 6: Result received: {...}                                              │
+│ Step 7: YouTube detection successful!                                       │
+│ Key: G                                                                      │
+│ Scale: Major                                                                │
+│ Confidence: 85                                                              │
+│ Step 8: Updating key display...                                             │
+│ Step 9: Adding to history...                                                │
+│ === YouTube Key Detection Complete ===                                      │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Backend (Python Server Terminal):
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Downloading: https://www.youtube.com/watch?v=dQw4w9WgXcQ                    │
+│ Downloaded: Never Gonna Give You Up                                         │
+│ Detected: G Major (85%)                                                     │
+│ 127.0.0.1 - - [23/Feb/2026 10:30:45] "POST /download-and-detect HTTP/1.1"  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                           ERROR SCENARIOS                                    ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Error 1: Server Not Running
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Step 3: Checking YouTube server...                                          │
+│ YouTube server ready: false                                                 │
+│ ❌ Error: YouTube server not running on port 5001.                          │
+│                                                                              │
+│ Please run: python youtube_server.py                                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Error 2: Not a Video URL
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Step 2: Getting URL from webview...                                         │
+│ Current URL: https://www.youtube.com/                                       │
+│ ❌ Error: Not a YouTube video URL. Please navigate to a video first.        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+Error 3: ffmpeg Missing
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Python Server:                                                               │
+│ ERROR: ffmpeg not found. Please install ffmpeg and add to PATH              │
+│                                                                              │
+│ Frontend:                                                                    │
+│ ❌ Error: ffmpeg not found                                                  │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         TIMING BREAKDOWN                                     ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Total Time: 5-15 seconds (depends on internet speed)
+
+├─ Download audio (yt-dlp + ffmpeg): 3-10 seconds
+├─ Load audio (librosa): 0.5-1 second
+├─ Extract chroma: 0.5-1 second
+├─ Detect key: 0.1 second
+└─ Return result: 0.1 second
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                      TECHNICAL SPECIFICATIONS                                ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Audio Processing:
+├─ Sample Rate: 22050 Hz
+├─ Duration: First 30 seconds only
+├─ Channels: Mono
+└─ Format: m4a (from YouTube)
+
+Chroma Extraction:
+├─ Method: Constant-Q Transform (chroma_cqt)
+├─ Hop Length: 2048 samples
+├─ Bins per Octave: 12
+└─ Output: 12-dimensional vector (one per pitch class)
+
+Key Detection:
+├─ Algorithm: Krumhansl-Schmuckler
+├─ Method: Pearson correlation
+├─ Profiles: KK_MAJOR and KK_MINOR
+├─ Keys Tested: 24 (12 major + 12 minor)
+└─ Output: Key, Scale, Confidence (0-100%)
+
+
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         DEPENDENCIES                                         ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Python Packages:
+├─ flask==3.0.0          (Web server)
+├─ flask-cors==4.0.0     (CORS support)
+├─ yt-dlp==2024.3.10     (YouTube downloader)
+├─ librosa==0.10.1       (Audio analysis)
+└─ numpy==1.26.2         (Numerical computing)
+
+External Tools:
+└─ ffmpeg                (Audio extraction - REQUIRED!)
+
+Node Packages:
+└─ electron              (Desktop app framework)

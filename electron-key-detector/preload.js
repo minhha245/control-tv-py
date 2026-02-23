@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // Get available audio sources
     getAudioSources: () => ipcRenderer.invoke('get-audio-sources'),
 
+    // Download YouTube and detect key
+    downloadAndDetectYouTube: (url) => ipcRenderer.invoke('download-and-detect-youtube', url),
+
+    // Check YouTube server status
+    checkYouTubeServer: () => ipcRenderer.invoke('check-youtube-server'),
+
     // Listen for Python bridge status
     onPythonStatus: (callback) => {
         ipcRenderer.on('python-status', (event, status) => callback(status));
