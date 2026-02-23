@@ -52,6 +52,15 @@ temp_youtube/
 node_modules/
 package-lock.json
 
+# Electron build artifacts (LARGE FILES)
+**/release/
+**/dist/
+**/out/
+**/*.asar
+**/win-unpacked/
+**/mac/
+**/linux-unpacked/
+
 # Backup files
 *.backup
 *.bak
