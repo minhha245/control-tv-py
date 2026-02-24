@@ -155,12 +155,12 @@ class KeyDetectionEngine {
             this.dropZone.addEventListener('drop', async (e) => {
                 e.preventDefault();
                 this.dropZone.classList.remove('drag-over');
-                
+
                 // Try to get file path from Electron
                 const files = e.dataTransfer.files;
                 if (files.length > 0) {
                     const file = files[0];
-                    
+
                     // If running in Electron and file has path, use Electron API
                     if (window.electronAPI && file.path) {
                         console.log('Using Electron API for dropped file:', file.path);
@@ -240,14 +240,14 @@ class KeyDetectionEngine {
             console.log('Checking Python server...');
             const pythonReady = await window.electronAPI.checkPythonServer();
             console.log('Python server ready:', pythonReady);
-            
+
             if (pythonReady) {
                 console.log('Using Python server for key detection');
                 await this.detectKeyViaPython(fileInfo);
             } else {
                 console.warn('Python server not available');
                 this.hideProgress();
-                
+
                 const retry = confirm('Python server chưa chạy.\n\nVui lòng chạy: python audio_server.py\n\nBấm OK để thử lại, Cancel để hủy.');
                 if (retry) {
                     setTimeout(() => this.openElectronFileDialog(), 1000);
@@ -269,9 +269,9 @@ class KeyDetectionEngine {
 
             // Detect key via Python (FAST & ACCURATE)
             const result = await window.electronAPI.detectKeyPython(fileInfo.path);
-            
-            if (!result) {
-                throw new Error('Python key detection failed');
+
+            if (!result || result.error) {
+                throw new Error(result?.error || 'Python key detection failed');
             }
 
             console.log('Python detected:', result);
@@ -330,7 +330,7 @@ class KeyDetectionEngine {
 
             // Decode via Python server
             const audioData = await window.electronAPI.decodeAudioPython(fileInfo.path);
-            
+
             if (!audioData) {
                 throw new Error('Python decode failed');
             }
@@ -344,9 +344,9 @@ class KeyDetectionEngine {
 
             // Extract chroma or get direct result
             const chromaOrResult = await this.extractChroma(samples, audioData.sampleRate);
-            
+
             let result;
-            
+
             // Check if Essentia returned direct result
             if (chromaOrResult.directResult) {
                 console.log('Using Essentia direct result');
@@ -356,7 +356,7 @@ class KeyDetectionEngine {
                     confidence: chromaOrResult.confidence,
                     alternatives: []
                 };
-                
+
                 // Generate fake chroma for visualization
                 const chroma = new Array(12).fill(0);
                 const keyMap = {
@@ -367,7 +367,7 @@ class KeyDetectionEngine {
                 chroma[keyIndex] = 1.0;
                 chroma[(keyIndex + 7) % 12] = 0.7; // Fifth
                 chroma[(keyIndex + 4) % 12] = 0.6; // Third
-                
+
                 result.chroma = chroma;
             } else {
                 // Use Krumhansl-Schmuckler on chroma
@@ -427,7 +427,7 @@ class KeyDetectionEngine {
             // Decode with timeout
             const audioBuffer = await Promise.race([
                 tempContext.decodeAudioData(arrayBuffer),
-                new Promise((_, reject) => 
+                new Promise((_, reject) =>
                     setTimeout(() => reject(new Error('Decode timeout')), 30000)
                 )
             ]);
@@ -552,10 +552,10 @@ class KeyDetectionEngine {
 
             // Decode original audio with timeout protection
             console.log('Starting decodeAudioData...');
-            
+
             const audioBuffer = await Promise.race([
                 this.audioContext.decodeAudioData(arrayBuffer.slice(0)), // Clone buffer
-                new Promise((_, reject) => 
+                new Promise((_, reject) =>
                     setTimeout(() => reject(new Error('Decode timeout')), 30000)
                 )
             ]);
@@ -578,7 +578,7 @@ class KeyDetectionEngine {
             const leftChannel = audioBuffer.getChannelData(0);
             const rightChannel = audioBuffer.getChannelData(1);
             const monoSamples = new Float32Array(leftChannel.length);
-            
+
             for (let i = 0; i < leftChannel.length; i++) {
                 monoSamples[i] = (leftChannel[i] + rightChannel[i]) / 2;
             }
@@ -683,7 +683,7 @@ class KeyDetectionEngine {
      */
     async extractChroma(samples, sampleRate) {
         console.log('Extracting chroma with Essentia.js Key algorithm');
-        
+
         if (!this.essentia || !this.essentia.Key) {
             console.warn('Essentia Key not available, using fallback');
             return this.computeSimpleChroma(samples, sampleRate);
@@ -692,20 +692,20 @@ class KeyDetectionEngine {
         try {
             // Use Essentia's built-in Key algorithm (most accurate)
             const keyResult = this.essentia.Key(samples);
-            
+
             console.log('Essentia Key result:', keyResult);
-            
+
             // keyResult contains: key, scale, strength
             // Convert to our format
             const keyMap = {
                 'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4, 'F': 5,
                 'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11
             };
-            
+
             const keyIndex = keyMap[keyResult.key] || 0;
             const scale = keyResult.scale === 'major' ? 'Major' : 'Minor';
             const confidence = Math.round(keyResult.strength * 100);
-            
+
             // Return result directly without chroma
             return {
                 directResult: true,
@@ -713,7 +713,7 @@ class KeyDetectionEngine {
                 scale: scale,
                 confidence: confidence
             };
-            
+
         } catch (e) {
             console.error('Essentia Key error:', e);
             return this.computeSimpleChroma(samples, sampleRate);
@@ -727,50 +727,50 @@ class KeyDetectionEngine {
         const chroma = new Array(12).fill(0);
         const frameSize = 4096; // Reduced from 8192
         const hopSize = 2048; // Larger hop = fewer frames
-        
+
         // Only analyze first 30 seconds for speed
         const maxSamples = Math.min(samples.length, sampleRate * 30);
-        
+
         const A4 = 440.0;
-        
+
         const numFrames = Math.floor((maxSamples - frameSize) / hopSize);
-        
+
         for (let frame = 0; frame < numFrames; frame++) {
             const start = frame * hopSize;
             const end = Math.min(start + frameSize, maxSamples);
-            
+
             if (end - start < frameSize) continue;
-            
+
             const frameData = samples.slice(start, end);
-            
+
             // Apply Hann window
             const windowed = new Float32Array(frameSize);
             for (let i = 0; i < frameSize; i++) {
                 const window = 0.5 * (1 - Math.cos(2 * Math.PI * i / frameSize));
                 windowed[i] = frameData[i] * window;
             }
-            
+
             // For each pitch class
             for (let pc = 0; pc < 12; pc++) {
                 let pcEnergy = 0;
-                
+
                 // Only 3 octaves (C3-C6) for speed
                 for (let octave = 3; octave <= 5; octave++) {
                     const noteFreq = 261.63 * Math.pow(2, (octave - 4) + pc / 12);
-                    
+
                     // Only 2 harmonics for speed
                     for (let harmonic = 1; harmonic <= 2; harmonic++) {
                         const freq = noteFreq * harmonic;
-                        
+
                         if (freq >= sampleRate / 2) continue;
-                        
+
                         const bin = freq * frameSize / sampleRate;
                         const binLow = Math.floor(bin);
                         const binHigh = Math.ceil(bin);
-                        
+
                         if (binLow >= 0 && binHigh < frameSize / 2) {
                             let energy = 0;
-                            
+
                             // Simple DFT for these bins
                             for (const b of [binLow, binHigh]) {
                                 let re = 0, im = 0;
@@ -781,25 +781,25 @@ class KeyDetectionEngine {
                                 }
                                 energy += Math.sqrt(re * re + im * im);
                             }
-                            
+
                             const harmonicWeight = 1.0 / harmonic;
                             const octaveWeight = octave === 4 ? 1.5 : 1.0; // Favor C4 octave
-                            
+
                             pcEnergy += energy * harmonicWeight * octaveWeight;
                         }
                     }
                 }
-                
+
                 chroma[pc] += pcEnergy;
             }
         }
-        
+
         // Normalize
         const maxVal = Math.max(...chroma);
         if (maxVal > 0) {
             return chroma.map(v => v / maxVal);
         }
-        
+
         return chroma;
     }
 
@@ -915,9 +915,11 @@ class KeyDetectionEngine {
             if (item.scale === 'Major') {
                 this.scaleBadge.classList.add('major');
                 if (this.scaleValue) this.scaleValue.textContent = (item.key || '--') + ' Major';
-            } else {
+            } else if (item.scale === 'Minor') {
                 this.scaleBadge.classList.add('minor');
                 if (this.scaleValue) this.scaleValue.textContent = (item.key || '--') + ' Minor';
+            } else {
+                if (this.scaleValue) this.scaleValue.textContent = '--';
             }
         }
 
@@ -942,9 +944,6 @@ class KeyDetectionEngine {
             }
         }
 
-        // Chroma bars
-        this.updateChromaDisplay(item.chroma, item.key);
-
         // Alternative keys
         if (this.altKeysSection && this.altKeysList) {
             if (item.alternatives && item.alternatives.length > 1) {
@@ -952,13 +951,16 @@ class KeyDetectionEngine {
                 this.altKeysList.innerHTML = item.alternatives.slice(1, 4).map(alt => `
                     <div class="alt-key-item">
                         <span class="alt-key-name">${alt.key} ${alt.scale}</span>
-                        <span class="alt-key-score">${(alt.avgCorrelation * 100).toFixed(1)}%</span>
+                        <span class="alt-key-score">${(alt.correlation * 100).toFixed(1)}%</span>
                     </div>
                 `).join('');
             } else {
                 this.altKeysSection.style.display = 'none';
             }
         }
+
+        // Chroma bars
+        this.updateChromaDisplay(item.chroma, item.key);
     }
 
     updateChromaDisplay(chroma, rootKey) {
@@ -971,9 +973,10 @@ class KeyDetectionEngine {
             bar.style.height = height + 'px';
 
             bar.classList.remove('active', 'root');
-            if (NOTE_NAMES[i] === rootKey) {
+            const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+            if (noteNames[i] === rootKey) {
                 bar.classList.add('root');
-            } else if (maxVal > 0 && chroma[i] / maxVal > 0.5) {
+            } else if (maxVal > 0 && (chroma[i] / maxVal) > 0.5) {
                 bar.classList.add('active');
             }
         });
@@ -1021,25 +1024,24 @@ class KeyDetectionEngine {
                     </div>
                 </div>
                 <div class="file-item-right">
-                    <span class="file-item-key">${item.key} ${item.scale.charAt(0)}</span>
-                    <span class="file-item-confidence">${item.confidence}%</span>
+                    <span class="file-item-key">${item.key || '--'} ${item.scale ? item.scale.charAt(0) : ''}</span>
+                    <span class="file-item-confidence">${item.confidence || 0}%</span>
                 </div>
             </div>
         `).join('');
 
         // Bind click events
-        if (this.fileList) {
-            this.fileList.querySelectorAll('.file-item').forEach(el => {
-                el.addEventListener('click', () => {
-                    const idx = parseInt(el.dataset.index);
-                    this.activeFileIndex = idx;
-                    this.displayResult(this.fileHistory[idx]);
-                    this.renderFileList();
-                });
+        this.fileList.querySelectorAll('.file-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const idx = parseInt(el.dataset.index);
+                this.activeFileIndex = idx;
+                this.displayResult(this.fileHistory[idx]);
+                this.renderFileList();
             });
-        }
+        });
     }
 }
+
 
 // ============================================
 // Initialize App

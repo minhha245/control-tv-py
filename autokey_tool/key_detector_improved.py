@@ -277,9 +277,10 @@ class KeyDetector:
         
         # Weighted ensemble (CENS most reliable for key detection)
         if has_crepe:
-            chroma_combined = 0.25 * chroma_stft + 0.25 * chroma_cqt + 0.25 * chroma_cens + 0.25 * chroma_crepe
+            chroma_combined = 0.1 * chroma_stft + 0.7 * chroma_cqt + 0.1 * chroma_cens + 0.1 * chroma_crepe
         else:
-            chroma_combined = 0.3 * chroma_stft + 0.3 * chroma_cqt + 0.4 * chroma_cens
+            # ESSENTIA-STYLE: Highly prioritize CQT for pitch accuracy
+            chroma_combined = 0.15 * chroma_stft + 0.75 * chroma_cqt + 0.1 * chroma_cens
         
         # Robust temporal median filtering
         if chroma_combined.shape[1] >= 5:
@@ -305,7 +306,7 @@ class KeyDetector:
     def _detect_key_with_profile(
         self, hpcp: np.ndarray, major_profile: np.ndarray, minor_profile: np.ndarray
     ) -> Tuple[int, str, float]:
-        """Detect key using a specific profile pair."""
+        """Detect key using a specific profile pair via Pearson Correlation."""
         best_corr = -1.0
         best_key = 0
         best_mode = "Major"
@@ -313,8 +314,9 @@ class KeyDetector:
         for shift in range(12):
             rotated = np.roll(hpcp, -shift)
             
-            major_corr = np.dot(rotated, major_profile)
-            minor_corr = np.dot(rotated, minor_profile)
+            # Use Pearson Correlation to match Essentia-style exact behavior
+            major_corr = np.corrcoef(rotated, major_profile)[0, 1]
+            minor_corr = np.corrcoef(rotated, minor_profile)[0, 1]
 
             if major_corr > best_corr:
                 best_corr = major_corr
@@ -335,33 +337,33 @@ class KeyDetector:
         """
         results = {}
         
-        # 1. EDMA (weight: 0.30) - Best for Electronic/Pop/Karaoke
-        key_idx, mode, corr = self._detect_key_with_profile(
-            hpcp, self._profiles['edma_major'], self._profiles['edma_minor']
-        )
-        key = f"{KEY_NAMES[key_idx]} {mode}"
-        results[key] = results.get(key, 0) + 0.30 * corr
-        
-        # 2. Krumhansl-Kessler (weight: 0.30) - Standard cognitive profile
+        # 1. Krumhansl-Kessler (weight: 0.65) - ESSENTIA PRIMARY PROFILE
         key_idx, mode, corr = self._detect_key_with_profile(
             hpcp, self._profiles['krumhansl_major'], self._profiles['krumhansl_minor']
         )
         key = f"{KEY_NAMES[key_idx]} {mode}"
-        results[key] = results.get(key, 0) + 0.30 * corr
+        results[key] = results.get(key, 0) + 0.65 * corr
+        
+        # 2. EDMA (weight: 0.15) - Pop/Karaoke
+        key_idx, mode, corr = self._detect_key_with_profile(
+            hpcp, self._profiles['edma_major'], self._profiles['edma_minor']
+        )
+        key = f"{KEY_NAMES[key_idx]} {mode}"
+        results[key] = results.get(key, 0) + 0.15 * corr
 
-        # 3. Sha'ath (weight: 0.25) - Modern profile for contemporary music
+        # 3. Sha'ath (weight: 0.10) - Modern
         key_idx, mode, corr = self._detect_key_with_profile(
             hpcp, self._profiles['shaath_major'], self._profiles['shaath_minor']
         )
         key = f"{KEY_NAMES[key_idx]} {mode}"
-        results[key] = results.get(key, 0) + 0.25 * corr
+        results[key] = results.get(key, 0) + 0.10 * corr
         
-        # 4. Temperley (weight: 0.15) - Best for Rock/Pop
+        # 4. Temperley (weight: 0.10) - Rock/Pop
         key_idx, mode, corr = self._detect_key_with_profile(
             hpcp, self._profiles['temperley_major'], self._profiles['temperley_minor']
         )
         key = f"{KEY_NAMES[key_idx]} {mode}"
-        results[key] = results.get(key, 0) + 0.15 * corr
+        results[key] = results.get(key, 0) + 0.10 * corr
         
         # Sort and get results
         sorted_results = sorted(results.items(), key=lambda x: x[1], reverse=True)
@@ -671,16 +673,17 @@ class KeyDetector:
                 # === FAST TUNING ===
                 tuning = librosa.estimate_tuning(y=audio_to_use, sr=self.sample_rate, bins_per_octave=36)
 
-                # === FAST HPCP (2-method) ===
-                chroma_stft = librosa.feature.chroma_stft(
+                # === ESSENTIA-STYLE HPCP (CQT Priority) ===
+                chroma_cqt = librosa.feature.chroma_cqt(
                     y=audio_to_use, sr=self.sample_rate, hop_length=FAST_HOP,
-                    n_fft=4096, n_chroma=12, tuning=tuning,
+                    n_chroma=12, tuning=tuning,
                 )
                 chroma_cens = librosa.feature.chroma_cens(
                     y=audio_to_use, sr=self.sample_rate, hop_length=FAST_HOP,
                     n_chroma=12, tuning=tuning,
                 )
-                chunk_hpcp = 0.5 * np.mean(chroma_stft, axis=1) + 0.5 * np.mean(chroma_cens, axis=1)
+                # Weighted blend: Favor CQT (80%) for static analysis like Essentia
+                chunk_hpcp = 0.8 * np.mean(chroma_cqt, axis=1) + 0.2 * np.mean(chroma_cens, axis=1)
                 chunk_hpcp = chunk_hpcp / np.linalg.norm(chunk_hpcp)
                 
                 # === Detect key ===

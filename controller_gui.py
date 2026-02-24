@@ -1,3 +1,4 @@
+import tkinter as tk
 import customtkinter as ctk
 import rtmidi
 import threading
@@ -301,7 +302,7 @@ class App(ctk.CTk):
     # --- MAIN APP LOGIC ---
     def init_main_app(self):
         self.title("BẢNG ĐIỀU KHIỂN TIẾNG VIỆT - Hậu Setup Live Studio")
-        self.geometry("880x320")
+        self.geometry("880x280")
         self.resizable(False, False)
         self.configure(fg_color=self.col_bg)
 
@@ -322,16 +323,17 @@ class App(ctk.CTk):
             "listen_y_offset": 0.32,
             "send_x_offset": 0.5,
             "send_y_from_bottom": 140,
-            "cubase_project_path": ""
+            "cubase_project_path": "",
+            "cubase_exit_action": "dont_save"
         }
 
         # Auto-Key Detection state
         self.autokey_running = False
         self.autokey_analysis_thread = None
-        self.audio_engine = None
-        self.key_detector = None
+        # self.audio_engine = None # Removed legacy engine
+        # self.key_detector = None # Removed legacy detector
         self.loopback_devices = []
-        self.autokey_loaded = False
+        self.autokey_loaded = True # Bypassing legacy loader
         
         # Essentia Key Detector state
         self.essentia_server_process = None
@@ -342,6 +344,13 @@ class App(ctk.CTk):
         self.youtube_panel = None  # Control panel window
         self.last_youtube_url = None  # Track last detected URL
         self.auto_detect_enabled = False  # Auto-detect flag
+        
+        # Marquee UI state
+        self.marquee_text = "   BẢNG ĐIỀU KHIỂN TIẾNG VIỆT  ★  HẬU SETUP LIVE STUDIO  ★   "
+        self.marquee_canvas = None
+        self.marquee_item = None
+        self.marquee_speed = 1.5 # Pixels per frame
+        self.marquee_width = 0
         
         # We will initialize loopback_devices list separately or lazily
         # For now, we'll try to get devices without loading heavy DSP libs if possible
@@ -354,6 +363,7 @@ class App(ctk.CTk):
         self.load_settings()
         self.load_autokey_coords()
         self.start_essentia_server()
+        self.update_marquee() # Start marquee animation
         self.after(1000, self.open_saved_project)
 
     def open_saved_project(self):
@@ -532,25 +542,58 @@ class App(ctk.CTk):
         self.autokey_confidence_bar.pack(pady=(0, 4), padx=10, fill="x")
         self.autokey_confidence_bar.set(0)
 
-        # Device selector
-        dev_frame = ctk.CTkFrame(autokey_frame, fg_color="transparent")
-        dev_frame.pack(fill="x", padx=5, pady=(0, 3))
-        
-        self.autokey_device_var = ctk.StringVar(value="Chọn nguồn âm thanh...")
-        self.autokey_device_select = ctk.CTkOptionMenu(
-            dev_frame, 
-            values=["Chọn nguồn âm thanh..."],
-            variable=self.autokey_device_var,
-            font=("Arial", 8),
-            height=20,
-            width=160,
-            fg_color="#333",
-            dropdown_fg_color="#2a2a2a"
-        )
-        self.autokey_device_select.pack(fill="x")
+        # Audio source selection removed as requested
 
-        ctk.CTkLabel(frame, text="BẢNG ĐIỀU KHIỂN TIẾNG VIỆT", font=("Arial", 11, "bold"), text_color=self.col_text_yellow).pack(side="bottom", pady=2)
-        ctk.CTkLabel(frame, text="Hậu Setup Live Studio", font=("Arial", 10, "bold"), text_color=self.col_text_green).pack(side="bottom", pady=2)
+        # Audio source selection removed as requested
+
+        marquee_container = ctk.CTkFrame(frame, fg_color="#000", height=30, corner_radius=5, border_width=1, border_color="#333")
+        marquee_container.pack(side="bottom", fill="x", padx=5, pady=5)
+        marquee_container.pack_propagate(False)
+
+        # Use Canvas for smooth pixel scrolling instead of Label
+        self.marquee_canvas = tk.Canvas(
+            marquee_container, 
+            bg="black", 
+            highlightthickness=0,
+            height=30
+        )
+        self.marquee_canvas.pack(fill="both", expand=True)
+
+        # Create text item on canvas
+        # We start at the right edge
+        self.marquee_item = self.marquee_canvas.create_text(
+            200, 15, # Placeholder X, Y=middle
+            text=self.marquee_text,
+            fill=self.col_text_yellow,
+            font=("Arial", 11, "bold"),
+            anchor="w"
+        )
+
+    def update_marquee(self):
+        """Update marquee position by shifting pixels for smoothness."""
+        if not self.marquee_canvas or not self.marquee_item:
+            self.after(200, self.update_marquee)
+            return
+
+        try:
+            # Shift text to the left
+            self.marquee_canvas.move(self.marquee_item, -self.marquee_speed, 0)
+            
+            # Get current position
+            bbox = self.marquee_canvas.bbox(self.marquee_item)
+            if bbox:
+                # If text has completely scrolled off the left edge (x2 < 0)
+                if bbox[2] < 0:
+                    # Reset to right edge
+                    canvas_width = self.marquee_canvas.winfo_width()
+                    if canvas_width <= 1: canvas_width = 250 # Fallback if not yet rendered
+                    self.marquee_canvas.coords(self.marquee_item, canvas_width, 15)
+            
+            # Schedule next update (approx 50 FPS for smoothness)
+            self.after(20, self.update_marquee)
+        except Exception as e:
+            print(f"[Marquee] Error: {e}")
+            self.after(1000, self.update_marquee)
 
     def adjust_color(self, hex_color, factor=0.8):
         return hex_color
@@ -878,6 +921,24 @@ class App(ctk.CTk):
 
         ctk.CTkButton(settings_frame, text="CHỌN FILE", fg_color="#1f77b4", width=90, height=28, command=choose_project).grid(row=4, column=3, padx=10)
 
+        # Exit Action Selection
+        ctk.CTkLabel(settings_frame, text="Khi thoát Cubase:", font=("Arial", 11, "bold")).grid(row=5, column=0, sticky="w", pady=8, padx=5)
+        exit_action_var = ctk.StringVar(value=self.autokey_coords.get("cubase_exit_action", "dont_save"))
+        
+        exit_action_switch = ctk.CTkSegmentedButton(
+            settings_frame,
+            values=["save", "dont_save"],
+            command=lambda v: exit_action_var.set(v),
+            variable=exit_action_var,
+            font=("Arial", 11)
+        )
+        exit_action_switch.configure(values=["save", "dont_save"]) # Internal values
+        # Customizing display names
+        exit_action_switch._buttons_dict["save"].configure(text="LƯU (Save)")
+        exit_action_switch._buttons_dict["dont_save"].configure(text="KHÔNG LƯU (Don't Save)")
+        
+        exit_action_switch.grid(row=5, column=1, columnspan=2, pady=8, padx=5, sticky="ew")
+
         info_text = ctk.CTkTextbox(popup, height=80, width=500, fg_color="#2a2a2a")
         info_text.pack(pady=10, padx=20)
         info_text.insert("1.0",
@@ -899,6 +960,7 @@ class App(ctk.CTk):
                 self.autokey_coords["send_x_offset"] = float(send_x_entry.get()) / 100
                 self.autokey_coords["send_y_from_bottom"] = int(send_y_entry.get())
                 self.autokey_coords["cubase_project_path"] = project_entry.get()
+                self.autokey_coords["cubase_exit_action"] = exit_action_var.get()
 
                 if self.save_autokey_coords():
                     tkinter.messagebox.showinfo("Thành công", "Đã lưu tọa độ Auto-Key!")
@@ -1040,197 +1102,35 @@ class App(ctk.CTk):
             orig_col = self.btn_colors.get("LAY_TONE", self.col_btn_purple)
             if btn: btn.configure(text="LẤY TONE", fg_color=orig_col, text_color="white")
 
-    # === AUTO-KEY DETECTION METHODS ===
-    def ensure_autokey_loaded(self):
-        """Lazy load heavy Auto-Key libraries and initialize components."""
-        if self.autokey_loaded:
-            return True
-            
-        if getattr(self, "autokey_loading", False):
-            return False
-            
-        self.autokey_loading = True
-        print("[Auto-Key] Loading heavy libraries (librosa, numpy, etc.)...")
-        self.autokey_status_label.configure(text="● LOADING...", text_color="#ffa726")
-        self.update_idletasks() # Refresh UI colors
-        
-        try:
-            # Determine base path
-            if getattr(sys, 'frozen', False):
-                BASE_PATH = os.path.dirname(sys.executable)
-            else:
-                BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-
-            # Add to path
-            if BASE_PATH not in sys.path:
-                sys.path.insert(0, BASE_PATH)
-
-            # Lazy Imports
-            import numpy as np
-            from autokey_tool.audio_engine import AudioEngine
-            from autokey_tool.key_detector_improved import KeyDetector
-            
-            # Initialize components
-            self.audio_engine = AudioEngine(
-                sample_rate=44100,
-                buffer_seconds=1.5,
-                chunk_size=2048,
-            )
-            self.key_detector = KeyDetector(
-                sample_rate=44100,
-                smoothing_history=12,  # Faster response
-                confidence_threshold=0.1,
-                use_hpss=True,
-            )
-            
-            # Pre-warm detector (initializes librosa filters to avoid first-run delay)
-            print("[Auto-Key] Pre-warming detector...")
-            dummy_audio = np.zeros(44100, dtype=np.float32)
-            self.key_detector.detect_key(dummy_audio)
-            self.key_detector.reset()
-            
-            # Load devices
-            self.loopback_devices = self.audio_engine.get_loopback_devices()
-            device_names = [d['name'][:40] for d in self.loopback_devices] # Increased length for better visibility
-            
-            if device_names:
-                self.autokey_device_select.configure(values=device_names)
-                
-                # Intelligent Auto-Select Logic
-                best_device = device_names[0]
-                priority_keywords = ["default", "speaker", "stereo mix", "what u hear", "loopback"]
-                
-                found_priority = False
-                for keyword in priority_keywords:
-                    for name in device_names:
-                        if keyword.lower() in name.lower():
-                            best_device = name
-                            found_priority = True
-                            print(f"[Auto-Key] Auto-selected device: {best_device}")
-                            break
-                    if found_priority: break
-                
-                self.autokey_device_var.set(best_device)
-            
-            self.autokey_loaded = True
-            print(f"[Auto-Key] Successfully loaded. Found {len(self.loopback_devices)} devices.")
-            return True
-        except Exception as e:
-            print(f"[Auto-Key] Error during lazy load: {e}")
-            import traceback
-            traceback.print_exc()
-            tkinter.messagebox.showerror("Lỗi", f"Không thể tải Auto-Key: {e}")
-            self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f")
-            return False
-        finally:
-            self.autokey_loading = False
+    # ensure_autokey_loaded removed
 
     def toggle_autokey_detection(self):
         """Toggle Auto-Key detection on/off."""
-        # Check if already processing a start/stop action
-        if getattr(self, "autokey_processing", False) or getattr(self, "autokey_loading", False):
-            return
-            
-        if not self.autokey_loaded:
-            # First load might be slow, let's keep it synchronous 
-            # or could be moved to thread if really needed
-            if not self.ensure_autokey_loaded():
-                return
-        
-        self.autokey_processing = True
-        btn = self.btn_widgets.get("AUTO_KEY_DETECT")
+        # Toggle monitoring state
+        self.autokey_running = not self.autokey_running
         
         if self.autokey_running:
-            # STOPPING
-            if btn: btn.configure(text="STOP...", fg_color="#888")
-            threading.Thread(target=self.stop_autokey_worker, daemon=True).start()
+            # STARTED
+            print("[Auto-Key] YouTube monitoring enabled")
+            self._on_autokey_started()
         else:
-            # STARTING
-            if btn: btn.configure(text="START...", fg_color="#888")
-            threading.Thread(target=self.start_autokey_worker, daemon=True).start()
+            # STOPPED
+            print("[Auto-Key] YouTube monitoring disabled")
+            self._on_autokey_stopped()
     
-    def start_autokey_worker(self):
-        """Worker thread for starting detection."""
-        try:
-            print("[Auto-Key] Starting detection worker...")
-            
-            if self.autokey_running:
-                self.after(0, self._finish_processing)
-                return
-            
-            # Get selected device (must be done in thread safely, 
-            # but reading Tkinter var should be done via after or is str var thread safe? 
-            # Tkvar.get() is usually fine if mainloop running, but better safe.)
-            # We'll assume self.autokey_device_var.get() is safe enough or was cached.
-            # Actually, let's get it before thread start? Too late now, let's use a cached property or try get.
-            try:
-                selected_name = self.autokey_device_var.get()
-            except:
-                selected_name = ""
-
-            device_id = None
-            if self.loopback_devices:
-                for dev in self.loopback_devices:
-                    if dev['name'][:40] == selected_name:
-                        device_id = dev['id']
-                        break
-            
-            # Start audio engine
-            if self.audio_engine.start(device_id=device_id):
-                # Update KeyDetector sample rate
-                actual_rate = getattr(self.audio_engine, '_actual_sample_rate', 44100)
-                print(f"[Auto-Key] Sample rate: {actual_rate}Hz")
-                
-                self.key_detector.sample_rate = actual_rate
-                self.key_detector.reset()
-                
-                self.autokey_running = True
-                
-                # Start analysis thread
-                if self.autokey_analysis_thread is None or not self.autokey_analysis_thread.is_alive():
-                    self.autokey_analysis_thread = threading.Thread(
-                        target=self._autokey_analysis_loop, 
-                        daemon=True
-                    )
-                    self.autokey_analysis_thread.start()
-                
-                self.after(0, self._on_autokey_started)
-            else:
-                self.after(0, lambda: tkinter.messagebox.showerror("Lỗi", "Không thể bắt đầu capture audio loopback!"))
-                self.after(0, self._on_autokey_stopped)
-
-        except Exception as e:
-            print(f"Error starting autokey: {e}")
-            self.after(0, self._on_autokey_stopped)
-        finally:
-            self.after(0, self._finish_processing)
-
-    def stop_autokey_worker(self):
-        """Worker thread for stopping detection."""
-        try:
-            print("[Auto-Key] Stopping detection worker...")
-            self.autokey_running = False
-            
-            if self.audio_engine:
-                self.audio_engine.stop()
-                
-        except Exception as e:
-            print(f"[Auto-Key] Error stopping audio engine: {e}")
-        finally:
-            self.after(0, self._on_autokey_stopped)
-            self.after(0, self._finish_processing)
-
-    def _finish_processing(self):
-        self.autokey_processing = False
+    # Legacy detection workers and loop removed
+    
+    def stop_autokey_detection(self):
+        """Compatibility wrapper to stop monitoring."""
+        if self.autokey_running:
+            self.toggle_autokey_detection()
 
     def _on_autokey_started(self):
         btn = self.btn_widgets.get("AUTO_KEY_DETECT")
         if btn:
             btn.configure(text="STOP", fg_color="#d32f2f", text_color="white")
         
-        self.autokey_status_label.configure(text="● LISTENING", text_color="#4caf50")
-        if hasattr(self, 'autokey_device_select'):
-            self.autokey_device_select.configure(state="disabled")
+        self.autokey_status_label.configure(text="● MONITORING", text_color="#4caf50")
 
     def _on_autokey_stopped(self):
         btn = self.btn_widgets.get("AUTO_KEY_DETECT")
@@ -1242,54 +1142,6 @@ class App(ctk.CTk):
         self.detected_key_label.configure(text="---")
         self.detected_scale_label.configure(text="")
         self.autokey_confidence_bar.set(0)
-        
-        if hasattr(self, 'autokey_device_select'):
-            self.autokey_device_select.configure(state="normal")
-            
-    # Kept for compatibility if called directly, but should use toggle
-    def start_autokey_detection(self):
-        self.toggle_autokey_detection()
-            
-    def stop_autokey_detection(self):
-        if self.autokey_running and not getattr(self, "autokey_processing", False):
-            self.autokey_processing = True
-            threading.Thread(target=self.stop_autokey_worker, daemon=True).start()
-    
-    def _autokey_analysis_loop(self):
-        """Main analysis loop running in separate thread."""
-        import numpy as np
-        import traceback
-        
-        error_count = 0
-        
-        while self.autokey_running:
-            try:
-                # Get audio buffer
-                audio = self.audio_engine.get_buffer()
-                rms = self.audio_engine.get_buffer_rms()
-                
-                if len(audio) > 0:
-                    # Detect key
-                    try:
-                        key, mode, confidence = self.key_detector.detect_key(audio)
-                        error_count = 0  # Reset error count on success
-                    except Exception as detect_err:
-                        error_count += 1
-                        if error_count <= 3:  # Only log first 3 errors
-                            print(f"[Auto-Key] Detection error: {detect_err}")
-                            traceback.print_exc()
-                        key, mode, confidence = None, None, 0.0
-                    
-                    # Update UI (thread-safe)
-                    self.after(0, self._update_autokey_display, key, mode, confidence, rms)
-                
-                # Analysis rate
-                time.sleep(0.15)
-                
-            except Exception as e:
-                print(f"[Auto-Key] Analysis loop error: {e}")
-                traceback.print_exc()
-                time.sleep(0.5)
     
     def send_autokey_midi(self, key_str, scale_str):
         if not key_str or not scale_str: return
@@ -1429,6 +1281,11 @@ class App(ctk.CTk):
             return response.status_code == 200
         except:
             return False
+            
+    def check_ffmpeg(self):
+        """Check if ffmpeg/ffprobe is available."""
+        import shutil
+        return shutil.which("ffmpeg") is not None or shutil.which("ffprobe") is not None
     
     def detect_key_essentia(self, file_path):
         """Detect key using Essentia server."""
@@ -1436,7 +1293,7 @@ class App(ctk.CTk):
             response = requests.post(
                 f"http://127.0.0.1:{self.essentia_server_port}/detect-key",
                 json={"filePath": file_path},
-                timeout=30
+                timeout=60
             )
             
             if response.status_code == 200:
@@ -1514,7 +1371,7 @@ class App(ctk.CTk):
             print("[YouTube Browser] Opened YouTube")
             
             # Auto-enable monitoring
-            self.auto_detect_enabled = True
+            # self.auto_detect_enabled = True # Removed: Detection should only follow AUTO-KEY button
             self.youtube_monitor_active = True
             
             # Start monitoring thread
@@ -1524,13 +1381,13 @@ class App(ctk.CTk):
             )
             self.youtube_monitor_thread.start()
             
-            # Show notification
-            self.after(0, lambda: tkinter.messagebox.showinfo(
-                "YouTube Auto Detector",
-                "✅ Đã bật tự động phát hiện!\n\n"
-                "Click vào video YouTube để tự động phát hiện key.\n\n"
-                "Kết quả sẽ hiển thị trên panel AUTO-KEY."
-            ))
+            # Show notification - REMOVED AS REQUESTED
+            # self.after(0, lambda: tkinter.messagebox.showinfo(
+            #     "YouTube Auto Detector",
+            #     "✅ Đã bật tự động phát hiện!\n\n"
+            #     "Click vào video YouTube để tự động phát hiện key.\n\n"
+            #     "Kết quả sẽ hiển thị trên panel AUTO-KEY."
+            # ))
             
         except Exception as e:
             print(f"[YouTube Browser] Error: {e}")
@@ -1548,7 +1405,8 @@ class App(ctk.CTk):
         
         while self.youtube_monitor_active and self.youtube_browser:
             try:
-                if not self.auto_detect_enabled:
+                # Only proceed if AUTO-KEY is ON (autokey_running)
+                if not self.autokey_running:
                     time.sleep(1)
                     continue
                 
@@ -1574,7 +1432,6 @@ class App(ctk.CTk):
                         
                         # Wait before next check
                         time.sleep(5)
-                
                 time.sleep(1)  # Check every second
                 
             except Exception as e:
@@ -1584,104 +1441,105 @@ class App(ctk.CTk):
         print("[YouTube Monitor] Stopped")
     
     def _detect_youtube_url(self, url):
-        """Detect key from YouTube URL."""
+        """Detect key from YouTube URL using Cloud MP3 or Local Download."""
         try:
             # Update status
-            self.after(0, lambda: self.autokey_status_label.configure(text="● DOWNLOADING...", text_color="#ffa726"))
+            self.after(0, lambda: self.autokey_status_label.configure(text="● CONNECTING...", text_color="#ffa726"))
             self.after(0, lambda: self.detected_key_label.configure(text="..."))
-            self.after(0, lambda: self.detected_scale_label.configure(text="Đang tải..."))
-            
-            # Check if yt-dlp is available
-            try:
-                import yt_dlp
-            except ImportError:
-                self.after(0, lambda: tkinter.messagebox.showerror(
-                    "Lỗi", 
-                    "Chưa cài đặt yt-dlp!\n\nVui lòng cài đặt:\npip install yt-dlp"
-                ))
-                self.after(0, lambda: self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f"))
-                return
+            self.after(0, lambda: self.detected_scale_label.configure(text="Đang xử lý..."))
             
             # Create temp directory
             temp_dir = os.path.join(os.path.dirname(__file__), "temp_youtube")
             os.makedirs(temp_dir, exist_ok=True)
             
-            print(f"[YouTube] Downloading audio: {url}")
+            audio_path = None
             
-            # Download audio directly using yt-dlp CLI (simple and reliable)
-            output_template = os.path.join(temp_dir, "%(id)s.%(ext)s")
-            
+            # --- PHASE 1: CLOUD MP3 (Bypasses local FFmpeg need) ---
             try:
-                # Use CLI with timeout - Download opus/webm (native YouTube format, no conversion)
-                result = subprocess.run([
-                    sys.executable, "-m", "yt_dlp",
-                    "--format", "bestaudio",
-                    "--no-playlist",
-                    "--output", output_template,
-                    "--no-warnings",
-                    url
-                ], capture_output=True, text=True, timeout=120)  # 2 minutes timeout
+                import requests
+                api_url = "https://api.cobalt.tools/api/json"
+                payload = {"url": url, "downloadMode": "audio", "audioFormat": "mp3", "audioBitrate": "128"}
+                response = requests.post(api_url, headers={"Accept": "application/json", "Content-Type": "application/json"}, json=payload, timeout=12)
                 
-                if result.returncode != 0:
-                    raise Exception(f"Download failed: {result.stderr}")
+                if response.status_code == 200:
+                    res_data = response.json()
+                    if res_data.get("status") != "error" and res_data.get("url"):
+                        dl_url = res_data.get("url")
+                        filename = res_data.get("filename", "youtube_audio.mp3")
+                        if not filename.endswith(".mp3"): filename += ".mp3"
+                        
+                        audio_path = os.path.join(temp_dir, filename)
+                        self.after(0, lambda: self.autokey_status_label.configure(text="● DOWNLOADING MP3...", text_color="#ffa726"))
+                        
+                        with requests.get(dl_url, stream=True, timeout=20) as r:
+                            r.raise_for_status()
+                            with open(audio_path, 'wb') as f:
+                                for chunk in r.iter_content(chunk_size=8192):
+                                    f.write(chunk)
+            except: pass # Silent fallback to local
+
+            # --- PHASE 2: LOCAL DOWNLOAD (Using your exact ydl_opts) ---
+            if not audio_path:
+                print("[YouTube] Falling back to local yt-dlp with user source opts")
+                self.after(0, lambda: self.autokey_status_label.configure(text="● LOCAL DOWNLOAD...", text_color="#ffa726"))
                 
-                print("[YouTube] Download completed")
+                import yt_dlp
+                quality = "128"
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'extractaudio': True,
+                    'audioformat': 'mp3',
+                    'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': quality,
+            }],
+                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                }
                 
-            except subprocess.TimeoutExpired:
-                raise Exception("Download timeout (quá 2 phút)")
-            except Exception as e:
-                raise Exception(f"Download error: {e}")
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    audio_path = ydl.prepare_filename(info)
+                    
+                    # Fix extension if yt_dlp kept webm/m4a
+                    if not os.path.exists(audio_path):
+                        exts = ['.mp3', '.m4a', '.webm', '.opus']
+                        base = os.path.splitext(audio_path)[0]
+                        for e in exts:
+                            if os.path.exists(base + e):
+                                audio_path = base + e
+                                break
+
+            if not audio_path or not os.path.exists(audio_path):
+                raise Exception("Không thể lấy file âm thanh")
+
+            # --- PHASE 3: ANALYSIS ---
+            self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING TONE...", text_color="#ffa726"))
             
-            # Find downloaded file
-            audio_files = []
-            for ext in ['.m4a', '.webm', '.mp3', '.opus', '.ogg']:
-                audio_files.extend([f for f in os.listdir(temp_dir) if f.endswith(ext)])
-            
-            if not audio_files:
-                raise Exception("Không tìm thấy file audio đã tải")
-            
-            audio_path = os.path.join(temp_dir, audio_files[0])
-            print(f"[YouTube] Audio file: {audio_path}")
-            
-            self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING...", text_color="#ffa726"))
-            self.after(0, lambda: self.detected_scale_label.configure(text="Đang phân tích..."))
-            
-            # Detect key - Try Essentia first, fallback to librosa
-            key = None
-            scale = None
-            confidence = 0
-            
+            key, scale, confidence = None, None, 0
             if self.check_essentia_server():
-                print("[YouTube] Trying Essentia server...")
                 key, scale, confidence = self.detect_key_essentia(audio_path)
             
-            # If Essentia failed or not available, use fallback
             if not key or not scale:
-                print("[YouTube] Using librosa fallback...")
                 key, scale, confidence = self._detect_key_fallback(audio_path)
             
             # Clean up
-            try:
-                os.remove(audio_path)
-                print(f"[YouTube] Cleaned up: {audio_path}")
-            except:
-                pass
+            try: os.remove(audio_path)
+            except: pass
             
             if key and scale:
-                self.after(0, lambda: self._update_autokey_display(key, scale, confidence / 100, 1.0))
-                self.after(0, lambda: self.autokey_status_label.configure(text="● YOUTUBE DONE", text_color="#4caf50"))
-                self.send_autokey_midi(key, scale)
-                
-                print(f"[YouTube] Detected: {key} {scale} ({confidence}%)")
+                self.after(0, lambda: self._update_autokey_display(key, scale, confidence / 100.0, 1.0))
+                self.after(0, lambda: self.autokey_status_label.configure(text="● DONE", text_color="#4caf50"))
             else:
                 self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
-                print("[YouTube] Detection failed")
                 
         except Exception as e:
             print(f"[YouTube] Error: {e}")
             import traceback
             traceback.print_exc()
-            
             self.after(0, lambda: self.autokey_status_label.configure(text="● ERROR", text_color="#d32f2f"))
     
     def save_youtube_tabs(self):
@@ -1693,51 +1551,8 @@ class App(ctk.CTk):
         pass
     
     def _detect_key_fallback(self, audio_path):
-        """Fallback key detection using librosa."""
-        try:
-            import librosa
-            import numpy as np
-            
-            # Load audio
-            y, sr = librosa.load(audio_path, sr=22050, duration=30)
-            
-            # Extract chroma
-            chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=2048)
-            chroma_avg = np.mean(chroma, axis=1)
-            
-            # Simple key detection (Krumhansl-Kessler)
-            NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-            KK_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
-            KK_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
-            
-            max_corr = -1
-            detected_key = 'C'
-            detected_scale = 'Major'
-            
-            for tonic in range(12):
-                major_profile = np.roll(KK_MAJOR, tonic)
-                major_corr = np.corrcoef(chroma_avg, major_profile)[0, 1]
-                
-                if major_corr > max_corr:
-                    max_corr = major_corr
-                    detected_key = NOTE_NAMES[tonic]
-                    detected_scale = 'Major'
-                
-                minor_profile = np.roll(KK_MINOR, tonic)
-                minor_corr = np.corrcoef(chroma_avg, minor_profile)[0, 1]
-                
-                if minor_corr > max_corr:
-                    max_corr = minor_corr
-                    detected_key = NOTE_NAMES[tonic]
-                    detected_scale = 'Minor'
-            
-            confidence = int(max(0, min(100, (max_corr + 1) * 50)))
-            
-            return detected_key, detected_scale, confidence
-            
-        except Exception as e:
-            print(f"[Fallback] Error: {e}")
-            return None, None, 0
+        """No fallback available (legacy KeyDetector removed)."""
+        return None, None, 0
 
     def on_closing(self):
         print("\n🛑 Đang bắt đầu quy trình tắt...")
@@ -1807,21 +1622,37 @@ class App(ctk.CTk):
                             WindowsHelper.activate_window(dlg['hwnd'])
                             time.sleep(0.5)
                             
-                            # Tính toán vị trí nút "Don't Save" (nằm chính giữa hàng nút dưới cùng)
-                            click_x = dlg['rect']['left'] + (w // 2)
-                            click_y = dlg['rect']['top'] + h - 25 # Cách đáy khoảng 25 pixel
+                            # Decision based on setting
+                            exit_action = self.autokey_coords.get("cubase_exit_action", "dont_save")
                             
-                            print(f"🖱️ Click vào nút Don't Save tại ({click_x}, {click_y})")
-                            WindowsHelper.click(click_x, click_y)
-                            
-                            # Gửi thêm phím tắt cho chắc chắn (N hoặc D)
-                            for vk in [VK_N, VK_D]:
-                                user32.keybd_event(vk, 0, 0, 0) 
+                            if exit_action == "save":
+                                # Click "Save" button (usually on the left side of the dialog)
+                                click_x = dlg['rect']['left'] + (w // 4)
+                                click_y = dlg['rect']['top'] + h - 25
+                                print(f"🖱️ Click vào nút Save tại ({click_x}, {click_y})")
+                                WindowsHelper.click(click_x, click_y)
+                                
+                                # Send phím tắt S for Save
+                                user32.keybd_event(VK_S, 0, 0, 0)
                                 time.sleep(0.05)
-                                user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
-                                time.sleep(0.05)
-                            
-                            print("✅ Đã chọn 'Don't Save'")
+                                user32.keybd_event(VK_S, 0, KEYEVENTF_KEYUP, 0)
+                                print("✅ Đã chọn 'Save'")
+                            else:
+                                # Click "Don't Save" button (usually in the middle/right)
+                                click_x = dlg['rect']['left'] + (w // 2)
+                                click_y = dlg['rect']['top'] + h - 25 # Cách đáy khoảng 25 pixel
+                                
+                                print(f"🖱️ Click vào nút Don't Save tại ({click_x}, {click_y})")
+                                WindowsHelper.click(click_x, click_y)
+                                
+                                # Gửi thêm phím tắt cho chắc chắn (N hoặc D)
+                                for vk in [VK_N, VK_D]:
+                                    user32.keybd_event(vk, 0, 0, 0) 
+                                    time.sleep(0.05)
+                                    user32.keybd_event(vk, 0, KEYEVENTF_KEYUP, 0)
+                                    time.sleep(0.05)
+                                
+                                print("✅ Đã chọn 'Don't Save'")
                             found_dialog = True
                             time.sleep(0.05) # Đợi Cubase đóng hẳn
                             break
@@ -1871,49 +1702,25 @@ class App(ctk.CTk):
             self.after(0, lambda: self.detected_key_label.configure(text="..."))
             self.after(0, lambda: self.detected_scale_label.configure(text="Đang xử lý..."))
             
-            # Load audio using a more robust binary stream approach
-            # This bypasses many Unicode path and backend issues on Windows
-            import soundfile
-            import io
-            
-            self.after(0, lambda: self.autokey_status_label.configure(text="● DECODING...", text_color="#ffa726"))
-            
-            try:
-                # Try reading directly with soundfile first (handles most MP3s in newer versions)
-                # We use a binary stream to ensure file handles are handled correctly
-                with open(file_path, 'rb') as f:
-                    # Note: soundfile.read can take a file-like object
-                    # We limit to approx 3 mins (sr * 180 samples)
-                    # But we need sr first, so we use soundfile.info
-                    info = soundfile.info(f)
-                    sr = info.samplerate
-                    f.seek(0)
-                    y, _ = soundfile.read(f, frames=int(sr * 180))
+            # Check if Essentia server is available - prioritize it as requested
+            if self.check_essentia_server():
+                print(f"[Auto-Key] Using Essentia server for file: {file_path}")
+                self.after(0, lambda: self.autokey_status_label.configure(text="● SERVER ANALYZING...", text_color="#ffa726"))
+                
+                key, mode, conf = self.detect_key_essentia(file_path)
+                
+                if key and mode:
+                    # Update UI
+                    self.after(0, lambda: self._update_autokey_display(key, mode, conf/100.0, 1.0))
+                    self.after(0, lambda: self.autokey_status_label.configure(text="● DONE (ESSENTIA)", text_color="#4caf50"))
                     
-                    # If it's multi-channel, convert to mono
-                    if len(y.shape) > 1:
-                        y = y.mean(axis=1)
-            except Exception as sf_err:
-                print(f"[Auto-Key] Soundfile failed: {sf_err}, falling back to librosa...")
-                # Fallback to librosa logic (which might still fail but we try)
-                y, sr = librosa.load(file_path, sr=None, duration=180)
-            
-            self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING...", text_color="#ffa726"))
-            
-            # Use the static detection method
-            self.key_detector.sample_rate = sr
-            self.key_detector.reset()
-            
-            key, mode, conf, proc_time = self.key_detector.detect_static_audio(y)
-            
-            if key and mode:
-                self.after(0, lambda: self._update_autokey_display(key, mode, conf, 1.0))
-                self.after(0, lambda: self.autokey_status_label.configure(text=f"● DONE ({proc_time:.1f}s)", text_color="#4caf50"))
-                # Send to MIDI
-                self.send_autokey_midi(key, mode)
+                    # Send to MIDI
+                    self.send_autokey_midi(key, mode)
+                else:
+                    self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
             else:
-                self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
-                self.after(0, lambda: self.detected_scale_label.configure(text="Không tìm thấy tone"))
+                self.after(0, lambda: tkinter.messagebox.showerror("Lỗi", "Essentia server chưa chạy! Không thể phân tích file."))
+                self.after(0, lambda: self.autokey_status_label.configure(text="● SERVER OFF", text_color="#d32f2f"))
                 
         except Exception as e:
             print(f"[Auto-Key] File error: {e}")

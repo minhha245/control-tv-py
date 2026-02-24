@@ -78,6 +78,8 @@ echo [2/2] COPYING DATA FILES...
 if exist config.json copy /Y config.json %DIST_DIR%\
 if exist autokey_coords.json copy /Y autokey_coords.json %DIST_DIR%\
 if exist license.dat copy /Y license.dat %DIST_DIR%\
+if exist ffmpeg.exe copy /Y ffmpeg.exe %DIST_DIR%\
+if exist ffprobe.exe copy /Y ffprobe.exe %DIST_DIR%\
 
 echo.
 echo =========================================

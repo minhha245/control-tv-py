@@ -8,6 +8,16 @@ from flask_cors import CORS
 import librosa
 import numpy as np
 import os
+import sys
+
+# Ensure terminal can handle Unicode if possible, or avoid crashing on print
+try:
+    if sys.platform == 'win32':
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+except:
+    pass
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Electron
@@ -90,11 +100,37 @@ def decode_audio():
         if not file_path or not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 400
         
-        print(f'Decoding: {file_path}')
+        # Safe print for Windows console
+        try:
+            print(f'Decoding: {file_path}')
+        except:
+            print(f'Decoding: {os.path.basename(file_path).encode("ascii", "replace").decode("ascii")}')
         
-        # Load only first 30 seconds for speed
-        # Resample to 22050 Hz, mono
-        y, sr = librosa.load(file_path, sr=22050, mono=True, duration=30)
+        # Robust decoding
+        import soundfile as sf
+        y = None
+        sr = 22050
+        
+        try:
+            with open(file_path, 'rb') as f:
+                info = sf.info(f)
+                sr_native = info.samplerate
+                f.seek(0)
+                y, _ = sf.read(f, frames=int(sr_native * 30))
+                if len(y.shape) > 1:
+                    y = y.mean(axis=1)
+                # Resample if needed
+                if sr_native != sr:
+                    y = librosa.resample(y, orig_sr=sr_native, target_sr=sr)
+        except Exception as e:
+            print(f"Soundfile failed: {e}, falling back to librosa")
+            try:
+                y, _ = librosa.load(file_path, sr=sr, mono=True, duration=30)
+            except Exception as lib_err:
+                error_msg = f"[{type(lib_err).__name__}] {str(lib_err)}"
+                if "NoBackendError" in error_msg:
+                    error_msg += " - No audio backend found (install ffmpeg)"
+                raise Exception(error_msg)
         
         print(f'Decoded: {len(y)} samples, {sr} Hz, {len(y)/sr:.2f} seconds')
         
@@ -109,9 +145,18 @@ def decode_audio():
         })
         
     except Exception as e:
-        print(f'Error decoding audio: {e}')
-        return jsonify({'error': str(e)}), 500
+        error_msg = f"[{type(e).__name__}] {str(e)}"
+        if "NoBackendError" in error_msg:
+            error_msg += " - No audio backend found (install ffmpeg)"
+        print(f'Error decoding audio: {error_msg}')
+        return jsonify({'error': error_msg}), 500
 
+
+
+def check_ffmpeg():
+    """Check if ffmpeg is available in system PATH."""
+    import shutil
+    return shutil.which("ffmpeg") is not None
 
 @app.route('/detect-key', methods=['POST'])
 def detect_key():
@@ -125,11 +170,43 @@ def detect_key():
         if not file_path or not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 400
         
-        print(f'Detecting key: {file_path}')
+        # Safe print for Windows console
+        try:
+            print(f'Detecting key: {file_path}')
+        except:
+            print(f'Detecting key: {os.path.basename(file_path).encode("ascii", "replace").decode("ascii")}')
         
-        # Load audio (first 30s)
-        y, sr = librosa.load(file_path, sr=22050, mono=True, duration=30)
+        # Robust decoding
+        import soundfile as sf
+        y = None
+        sr = 22050
         
+        try:
+            with open(file_path, 'rb') as f:
+                info = sf.info(f)
+                sr_native = info.samplerate
+                f.seek(0)
+                y, _ = sf.read(f, frames=int(sr_native * 30))
+                if len(y.shape) > 1:
+                    y = y.mean(axis=1)
+                # Resample if needed
+                if sr_native != sr:
+                    y = librosa.resample(y, orig_sr=sr_native, target_sr=sr)
+        except Exception as e:
+            print(f"Soundfile failed: {e}, falling back to librosa")
+            try:
+                # Check for unsupported formats early to provide better error
+                ext = os.path.splitext(file_path)[1].lower()
+                if ext in ['.webm', '.m4a', '.opus'] and not check_ffmpeg():
+                     raise Exception(f"Định dạng {ext} yêu cầu FFmpeg để giải mã. Hãy dùng file MP3 Cloud hoặc cài FFmpeg.")
+                
+                y, _ = librosa.load(file_path, sr=sr, mono=True, duration=30)
+            except Exception as lib_err:
+                error_msg = f"[{type(lib_err).__name__}] {str(lib_err)}"
+                if "NoBackendError" in error_msg:
+                    error_msg += " - No audio backend found (install ffmpeg to support .webm/.m4a)"
+                raise Exception(error_msg)
+            
         # Extract chroma features using librosa (FAST & ACCURATE)
         chroma = librosa.feature.chroma_cqt(y=y, sr=sr, hop_length=2048)
         
@@ -146,10 +223,11 @@ def detect_key():
         return jsonify(result)
         
     except Exception as e:
-        print(f'Error detecting key: {e}')
+        error_msg = f"[{type(e).__name__}] {str(e)}"
+        print(f'Error detecting key: {error_msg}')
         import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': error_msg}), 500
 
 
 @app.route('/health', methods=['GET'])
@@ -158,6 +236,33 @@ def health():
     return jsonify({'status': 'ok'})
 
 
+def kill_port(port):
+    """Find and kill process listening on specified port (Windows only)."""
+    import subprocess
+    import os
+    try:
+        # Find PID using netstat
+        cmd = f"netstat -ano | findstr LISTENING | findstr :{port}"
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if result.stdout:
+            lines = result.stdout.strip().split('\n')
+            pids = set()
+            for line in lines:
+                parts = line.split()
+                if len(parts) > 4:
+                    pids.add(parts[-1])
+            
+            for pid in pids:
+                if int(pid) > 0 and int(pid) != os.getpid():
+                    print(f"[Server] Killing existing process on port {port} (PID: {pid})...")
+                    subprocess.run(f"taskkill /F /PID {pid}", shell=True, capture_output=True)
+    except Exception as e:
+        print(f"[Server] Error cleaning port {port}: {e}")
+
 if __name__ == '__main__':
+    # Ensure port 5000 is free
+    kill_port(5000)
+    
     print('Starting Audio Processing Server on http://localhost:5000')
     app.run(host='127.0.0.1', port=5000, debug=False)
