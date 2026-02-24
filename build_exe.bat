@@ -42,11 +42,14 @@ C:\Python311\python.exe -m PyInstaller ^
  --name "%APP_NAME%_v%NEW_VER%" ^
  --icon=%ICON% ^
  --add-data "autokey_tool;autokey_tool" ^
+ --add-data "essentia-key-detector;essentia-key-detector" ^
  --collect-all librosa ^
  --collect-all pyaudiowpatch ^
  --collect-all soundfile ^
  --collect-all audioread ^
  --collect-all soxr ^
+ --hidden-import=flask ^
+ --hidden-import=flask_cors ^
  --hidden-import=pkg_resources.extern ^
  --hidden-import=sklearn.utils._typedefs ^
  --hidden-import=sklearn.neighbors._partition_nodes ^

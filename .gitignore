@@ -88,3 +88,4 @@ debug_*.py
 
 # Documentation build
 docs/_build/
+version.txt

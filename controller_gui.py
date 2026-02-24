@@ -364,6 +364,7 @@ class App(ctk.CTk):
 
         self.load_settings()
         self.load_autokey_coords()
+        self.create_desktop_shortcut() # Create shortcut on first run
         self.start_essentia_server()
         self.update_marquee() # Start marquee animation
         self.after(1000, self.open_saved_project)
@@ -376,6 +377,35 @@ class App(ctk.CTk):
                 os.startfile(path)
             except Exception as e:
                 print(f"Error opening project: {e}")
+
+    def create_desktop_shortcut(self):
+        """Create a desktop shortcut using PowerShell if it doesn't exist."""
+        try:
+            if not getattr(sys, 'frozen', False):
+                return # Only create shortcut for bundled EXE
+                
+            exe_path = sys.executable
+            desktop = os.path.join(os.environ["USERPROFILE"], "Desktop")
+            # Get the name from the executable or a default
+            exe_name = os.path.basename(exe_path).replace(".exe", "")
+            shortcut_path = os.path.join(desktop, f"{exe_name}.lnk")
+            
+            if os.path.exists(shortcut_path):
+                return
+                
+            print(f"[Shortcut] Creating shortcut at: {shortcut_path}")
+            
+            # PowerShell command to create shortcut
+            shell_cmd = (
+                f'$s=(New-Object -ComObject WScript.Shell).CreateShortcut("{shortcut_path}");'
+                f'$s.TargetPath="{exe_path}";'
+                f'$s.WorkingDirectory="{os.path.dirname(exe_path)}";'
+                f'$s.Save()'
+            )
+            subprocess.run(["powershell", "-Command", shell_cmd], capture_output=True)
+            print("[Shortcut] Shortcut created successfully")
+        except Exception as e:
+            print(f"[Shortcut] Failed to create shortcut: {e}")
 
     def setup_left_panel(self):
         frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -1270,32 +1300,49 @@ class App(ctk.CTk):
 
     # === ESSENTIA KEY DETECTOR INTEGRATION ===
     def start_essentia_server(self):
-        """Start Essentia Python server in background."""
+        """Start Essentia Python server in a background thread."""
         try:
-            server_path = os.path.join("essentia-key-detector", "audio_server.py")
-            if not os.path.exists(server_path):
-                print("[Essentia] Server script not found, skipping...")
-                return
+            print("[Essentia] Integrating audio server as thread...")
+            # Detect search path for bundled data
+            base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+            essentia_path = os.path.join(base_path, "essentia-key-detector")
             
-            print("[Essentia] Starting audio server...")
-            self.essentia_server_process = subprocess.Popen(
-                ["python", server_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+            if essentia_path not in sys.path:
+                sys.path.append(essentia_path)
+            
+            print(f"[Essentia] Loading server from: {essentia_path}")
+            
+            try:
+                from audio_server import run_server
+            except ImportError as e:
+                print(f"[Essentia] Import error: {e}")
+                # Try fallback if package name mismatch
+                try:
+                    from essentia_key_detector.audio_server import run_server
+                except:
+                    raise e
+            
+            # Run server in background thread
+            self.essentia_thread = threading.Thread(
+                target=lambda: run_server(self.essentia_server_port),
+                daemon=True
             )
+            self.essentia_thread.start()
             
-            # Wait for server to start
-            time.sleep(2)
-            
-            # Check if server is running
-            if self.check_essentia_server():
-                print("[Essentia] Server started successfully")
-            else:
-                print("[Essentia] Server failed to start")
+            # Wait a bit and check if server is running
+            self.after(2000, self._check_essentia_startup)
                 
         except Exception as e:
-            print(f"[Essentia] Error starting server: {e}")
+            print(f"[Essentia] Error starting server thread: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _check_essentia_startup(self):
+        """Check if server started correctly after delay."""
+        if self.check_essentia_server():
+            print("[Essentia] Threaded server started successfully")
+        else:
+            print("[Essentia] Threaded server failed to respond on port 5000")
     
     def stop_essentia_server(self):
         """Stop Essentia Python server."""

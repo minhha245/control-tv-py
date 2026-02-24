@@ -260,9 +260,12 @@ def kill_port(port):
     except Exception as e:
         print(f"[Server] Error cleaning port {port}: {e}")
 
+def run_server(port=5000):
+    """Function to run the server from another thread."""
+    # Ensure port is free BEFORE running in a thread if we're not already the main process handling it
+    kill_port(port)
+    print(f'Starting Audio Processing Server on http://localhost:{port}')
+    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False)
+
 if __name__ == '__main__':
-    # Ensure port 5000 is free
-    kill_port(5000)
-    
-    print('Starting Audio Processing Server on http://localhost:5000')
-    app.run(host='127.0.0.1', port=5000, debug=False)
+    run_server(5000)

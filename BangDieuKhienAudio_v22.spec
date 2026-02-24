@@ -1,9 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('autokey_tool', 'autokey_tool')]
+datas = [('autokey_tool', 'autokey_tool'), ('essentia-key-detector', 'essentia-key-detector')]
 binaries = []
-hiddenimports = ['pkg_resources.extern', 'sklearn.utils._typedefs', 'sklearn.neighbors._partition_nodes', 'scipy.signal', 'scipy.fft', 'scipy.ndimage', 'numba']
+hiddenimports = ['flask', 'flask_cors', 'pkg_resources.extern', 'sklearn.utils._typedefs', 'sklearn.neighbors._partition_nodes', 'scipy.signal', 'scipy.fft', 'scipy.ndimage', 'numba']
 tmp_ret = collect_all('librosa')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pyaudiowpatch')
@@ -36,7 +36,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='BangDieuKhienAudio_v19',
+    name='BangDieuKhienAudio_v22',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -56,5 +56,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='BangDieuKhienAudio_v19',
+    name='BangDieuKhienAudio_v22',
 )
