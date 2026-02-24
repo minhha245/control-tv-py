@@ -323,12 +323,14 @@ class App(ctk.CTk):
             "listen_y_offset": 0.32,
             "send_x_offset": 0.5,
             "send_y_from_bottom": 140,
+            "listen_duration": 15,
             "cubase_project_path": "",
             "cubase_exit_action": "dont_save"
         }
 
         # Auto-Key Detection state
         self.autokey_running = False
+        self.auto_do_tone_enabled = False
         self.autokey_analysis_thread = None
         # self.audio_engine = None # Removed legacy engine
         # self.key_detector = None # Removed legacy detector
@@ -386,6 +388,7 @@ class App(ctk.CTk):
             ("MIC", self.col_btn_green, "MUTE_MIC"),
             ("VANG", self.col_btn_red, "VANG_FX"),
             ("AUTO-KEY", "#00bcd4", "AUTO_KEY_DETECT"),
+            ("AUTO DÒ", "#9c27b0", "AUTO_DO_TONE"),
             ("YOUTUBE", "#ff0000", "YOUTUBE_BROWSER"),  # Nút YouTube mới
             ("CÀI ĐẶT", "#1f77b4", "SETTINGS"),
             ("LƯU", self.col_btn_yellow, "SAVE")
@@ -410,6 +413,8 @@ class App(ctk.CTk):
                 cmd = self.open_settings_popup
             elif cc_key == "AUTO_KEY_DETECT":
                 cmd = self.toggle_autokey_detection
+            elif cc_key == "AUTO_DO_TONE":
+                cmd = self.toggle_auto_do_tone
             elif cc_key == "YOUTUBE_BROWSER":
                 cmd = self.open_youtube_browser
 
@@ -923,6 +928,13 @@ class App(ctk.CTk):
 
         # Exit Action Selection
         ctk.CTkLabel(settings_frame, text="Khi thoát Cubase:", font=("Arial", 11, "bold")).grid(row=5, column=0, sticky="w", pady=8, padx=5)
+        
+        # Listen duration setting
+        ctk.CTkLabel(settings_frame, text="Thời gian nghe (s):", font=("Arial", 11, "bold")).grid(row=6, column=0, sticky="w", pady=8, padx=5)
+        listen_duration_entry = ctk.CTkEntry(settings_frame, width=80)
+        listen_duration_entry.insert(0, str(self.autokey_coords.get("listen_duration", 15)))
+        listen_duration_entry.grid(row=6, column=1, pady=8, padx=5)
+
         exit_action_var = ctk.StringVar(value=self.autokey_coords.get("cubase_exit_action", "dont_save"))
         
         exit_action_switch = ctk.CTkSegmentedButton(
@@ -961,6 +973,7 @@ class App(ctk.CTk):
                 self.autokey_coords["send_y_from_bottom"] = int(send_y_entry.get())
                 self.autokey_coords["cubase_project_path"] = project_entry.get()
                 self.autokey_coords["cubase_exit_action"] = exit_action_var.get()
+                self.autokey_coords["listen_duration"] = int(listen_duration_entry.get())
 
                 if self.save_autokey_coords():
                     tkinter.messagebox.showinfo("Thành công", "Đã lưu tọa độ Auto-Key!")
@@ -1031,8 +1044,9 @@ class App(ctk.CTk):
             print(f"Click Listen ({listen_x}, {listen_y})...")
             WindowsHelper.click(listen_x, listen_y)
 
-            print("Đang nghe (15s)...")
-            time.sleep(15)
+            duration = self.autokey_coords.get("listen_duration", 15)
+            print(f"Đang nghe ({duration}s)...")
+            time.sleep(duration)
 
             print(f"Click Send ({send_x}, {send_y})...")
             WindowsHelper.click(send_x, send_y)
@@ -1110,6 +1124,10 @@ class App(ctk.CTk):
         self.autokey_running = not self.autokey_running
         
         if self.autokey_running:
+            # STOP AUTO DÒ if running
+            if self.auto_do_tone_enabled:
+                self.toggle_auto_do_tone()
+            
             # STARTED
             print("[Auto-Key] YouTube monitoring enabled")
             self._on_autokey_started()
@@ -1117,6 +1135,26 @@ class App(ctk.CTk):
             # STOPPED
             print("[Auto-Key] YouTube monitoring disabled")
             self._on_autokey_stopped()
+
+    def toggle_auto_do_tone(self):
+        """Toggle Auto Dò Tone on/off."""
+        self.auto_do_tone_enabled = not self.auto_do_tone_enabled
+        
+        btn = self.btn_widgets.get("AUTO_DO_TONE")
+        orig_color = self.btn_colors.get("AUTO_DO_TONE", "#9c27b0")
+        
+        if self.auto_do_tone_enabled:
+            # STOP AUTO-KEY if running
+            if self.autokey_running:
+                self.toggle_autokey_detection()
+                
+            if btn:
+                btn.configure(fg_color="#d32f2f", text="STOP")
+            print("[Auto Dò Tone] Enabled")
+        else:
+            if btn:
+                btn.configure(fg_color=orig_color, text="AUTO DÒ")
+            print("[Auto Dò Tone] Disabled")
     
     # Legacy detection workers and loop removed
     
@@ -1405,8 +1443,8 @@ class App(ctk.CTk):
         
         while self.youtube_monitor_active and self.youtube_browser:
             try:
-                # Only proceed if AUTO-KEY is ON (autokey_running)
-                if not self.autokey_running:
+                # Only proceed if AUTO-KEY is ON (autokey_running) OR AUTO DO TONE is ON
+                if not self.autokey_running and not self.auto_do_tone_enabled:
                     time.sleep(1)
                     continue
                 
@@ -1427,8 +1465,13 @@ class App(ctk.CTk):
                         # Wait a bit for video to load
                         time.sleep(2)
                         
-                        # Start detection
-                        self._detect_youtube_url(current_url)
+                        # Start detection or auto do tone
+                        if self.autokey_running:
+                            self._detect_youtube_url(current_url)
+                        elif self.auto_do_tone_enabled:
+                            # Tự động kích hoạt Dò Tone (click sequence)
+                            print("[Auto Dò Tone] Triggering start_autokey")
+                            self.after(0, self.start_autokey)
                         
                         # Wait before next check
                         time.sleep(5)
