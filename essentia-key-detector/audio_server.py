@@ -22,6 +22,9 @@ except:
 app = Flask(__name__)
 CORS(app)  # Enable CORS for Electron
 
+# Default analysis duration (can be changed via API)
+DEFAULT_DURATION = 30
+
 # Krumhansl-Kessler key profiles
 KK_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
 KK_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
@@ -90,23 +93,28 @@ def detect_key_krumhansl(chroma):
 @app.route('/decode-audio', methods=['POST'])
 def decode_audio():
     """
-    Decode audio file and return samples (OPTIMIZED - first 30s only)
+    Decode audio file and return samples with configurable duration
     """
     try:
-        # Get file path from request
+        # Get file path and duration from request
         data = request.get_json()
         file_path = data.get('filePath')
+        duration = data.get('duration', DEFAULT_DURATION)  # Use global default
         
         if not file_path or not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 400
+            
+        # Validate duration (5-120 seconds)
+        if not isinstance(duration, (int, float)) or not (5 <= duration <= 120):
+            duration = DEFAULT_DURATION
         
         # Safe print for Windows console
         try:
-            print(f'Decoding: {file_path}')
+            print(f'Decoding: {file_path} (duration: {duration}s)')
         except:
-            print(f'Decoding: {os.path.basename(file_path).encode("ascii", "replace").decode("ascii")}')
+            print(f'Decoding: {os.path.basename(file_path).encode("ascii", "replace").decode("ascii")} (duration: {duration}s)')
         
-        # Robust decoding
+        # Robust decoding with configurable duration
         import soundfile as sf
         y = None
         sr = 22050
@@ -116,7 +124,7 @@ def decode_audio():
                 info = sf.info(f)
                 sr_native = info.samplerate
                 f.seek(0)
-                y, _ = sf.read(f, frames=int(sr_native * 30))
+                y, _ = sf.read(f, frames=int(sr_native * duration))
                 if len(y.shape) > 1:
                     y = y.mean(axis=1)
                 # Resample if needed
@@ -125,7 +133,7 @@ def decode_audio():
         except Exception as e:
             print(f"Soundfile failed: {e}, falling back to librosa")
             try:
-                y, _ = librosa.load(file_path, sr=sr, mono=True, duration=30)
+                y, _ = librosa.load(file_path, sr=sr, mono=True, duration=duration)
             except Exception as lib_err:
                 error_msg = f"[{type(lib_err).__name__}] {str(lib_err)}"
                 if "NoBackendError" in error_msg:
@@ -141,7 +149,8 @@ def decode_audio():
             'samples': samples,
             'sampleRate': int(sr),
             'duration': float(len(y) / sr),
-            'numSamples': len(samples)
+            'numSamples': len(samples),
+            'requestedDuration': duration
         })
         
     except Exception as e:
@@ -161,22 +170,27 @@ def check_ffmpeg():
 @app.route('/detect-key', methods=['POST'])
 def detect_key():
     """
-    Detect key from audio file (FAST - uses librosa chroma)
+    Detect key from audio file with configurable duration
     """
     try:
         data = request.get_json()
         file_path = data.get('filePath')
+        duration = data.get('duration', DEFAULT_DURATION)  # Use global default
         
         if not file_path or not os.path.exists(file_path):
             return jsonify({'error': 'File not found'}), 400
+            
+        # Validate duration (5-120 seconds)
+        if not isinstance(duration, (int, float)) or not (5 <= duration <= 120):
+            duration = DEFAULT_DURATION
         
         # Safe print for Windows console
         try:
-            print(f'Detecting key: {file_path}')
+            print(f'Detecting key: {file_path} (duration: {duration}s)')
         except:
-            print(f'Detecting key: {os.path.basename(file_path).encode("ascii", "replace").decode("ascii")}')
+            print(f'Detecting key: {os.path.basename(file_path).encode("ascii", "replace").decode("ascii")} (duration: {duration}s)')
         
-        # Robust decoding
+        # Robust decoding with configurable duration
         import soundfile as sf
         y = None
         sr = 22050
@@ -186,7 +200,7 @@ def detect_key():
                 info = sf.info(f)
                 sr_native = info.samplerate
                 f.seek(0)
-                y, _ = sf.read(f, frames=int(sr_native * 30))
+                y, _ = sf.read(f, frames=int(sr_native * duration))
                 if len(y.shape) > 1:
                     y = y.mean(axis=1)
                 # Resample if needed
@@ -200,7 +214,7 @@ def detect_key():
                 if ext in ['.webm', '.m4a', '.opus'] and not check_ffmpeg():
                      raise Exception(f"Định dạng {ext} yêu cầu FFmpeg để giải mã. Hãy dùng file MP3 Cloud hoặc cài FFmpeg.")
                 
-                y, _ = librosa.load(file_path, sr=sr, mono=True, duration=30)
+                y, _ = librosa.load(file_path, sr=sr, mono=True, duration=duration)
             except Exception as lib_err:
                 error_msg = f"[{type(lib_err).__name__}] {str(lib_err)}"
                 if "NoBackendError" in error_msg:
@@ -217,8 +231,9 @@ def detect_key():
         
         # Detect key using Krumhansl-Schmuckler
         result = detect_key_krumhansl(chroma_avg)
+        result['analyzedDuration'] = duration  # Add analyzed duration to result
         
-        print(f'Detected: {result["key"]} {result["scale"]} ({result["confidence"]}%)')
+        print(f'Detected: {result["key"]} {result["scale"]} ({result["confidence"]}%) from {duration}s audio')
         
         return jsonify(result)
         
@@ -234,6 +249,35 @@ def detect_key():
 def health():
     """Health check endpoint"""
     return jsonify({'status': 'ok'})
+
+
+@app.route('/set-default-duration', methods=['POST'])
+def set_default_duration():
+    """Set default analysis duration"""
+    try:
+        data = request.get_json()
+        duration = data.get('duration', 30)
+        
+        # Validate duration
+        if not isinstance(duration, (int, float)) or not (5 <= duration <= 120):
+            return jsonify({'error': 'Duration must be between 5-120 seconds'}), 400
+            
+        # Store in global variable (you could also save to file)
+        global DEFAULT_DURATION
+        DEFAULT_DURATION = duration
+        
+        print(f'Default analysis duration set to: {duration}s')
+        return jsonify({'success': True, 'duration': duration})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/get-default-duration', methods=['GET'])
+def get_default_duration():
+    """Get current default analysis duration"""
+    global DEFAULT_DURATION
+    return jsonify({'duration': DEFAULT_DURATION})
 
 
 def kill_port(port):

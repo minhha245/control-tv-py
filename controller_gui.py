@@ -866,8 +866,8 @@ class App(ctk.CTk):
             btn.configure(text="ĐANG MỞ...", fg_color="#F0F0F0", text_color="black")
 
         popup = ctk.CTkToplevel(self)
-        popup.title("CÀI ĐẶT TỌA ĐỘ AUTO-KEY")
-        popup.geometry("550x520")
+        popup.title("CÀI ĐẶT AUTO-KEY & THỜI GIAN")
+        popup.geometry("550x750")
         popup.resizable(False, False)
         popup.configure(fg_color=self.col_bg)
 
@@ -885,7 +885,7 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             popup,
-            text="CÀI ĐẶT TỌA ĐỘ NÚT AUTO-KEY",
+            text="CÀI ĐẶT AUTO-KEY & THỜI GIAN DETECT",
             font=("Arial", 16, "bold"),
             text_color=self.col_text_green
         ).pack(pady=10)
@@ -959,11 +959,35 @@ class App(ctk.CTk):
         # Exit Action Selection
         ctk.CTkLabel(settings_frame, text="Khi thoát Cubase:", font=("Arial", 11, "bold")).grid(row=5, column=0, sticky="w", pady=8, padx=5)
         
-        # Listen duration setting
-        ctk.CTkLabel(settings_frame, text="Thời gian nghe (s):", font=("Arial", 11, "bold")).grid(row=6, column=0, sticky="w", pady=8, padx=5)
-        listen_duration_entry = ctk.CTkEntry(settings_frame, width=80)
+        # Timing Settings Section
+        timing_frame = ctk.CTkFrame(settings_frame, fg_color="#1a1a1a", corner_radius=8)
+        timing_frame.grid(row=6, column=0, columnspan=4, pady=15, padx=5, sticky="ew")
+        
+        ctk.CTkLabel(
+            timing_frame, 
+            text="⏱️ CÀI ĐẶT THỜI GIAN", 
+            font=("Arial", 12, "bold"),
+            text_color="#4CAF50"
+        ).pack(pady=(10, 5))
+        
+        timing_inner = ctk.CTkFrame(timing_frame, fg_color="transparent")
+        timing_inner.pack(pady=5, padx=10, fill="x")
+        
+        # Listen duration
+        ctk.CTkLabel(timing_inner, text="Thời gian nghe (giây):", font=("Arial", 11, "bold")).grid(row=0, column=0, sticky="w", pady=8, padx=5)
+        listen_duration_entry = ctk.CTkEntry(timing_inner, width=80)
         listen_duration_entry.insert(0, str(self.autokey_coords.get("listen_duration", 15)))
-        listen_duration_entry.grid(row=6, column=1, pady=8, padx=5)
+        listen_duration_entry.grid(row=0, column=1, pady=8, padx=5)
+        
+        ctk.CTkLabel(timing_inner, text="(5-60s)", font=("Arial", 9), text_color="#888888").grid(row=0, column=2, sticky="w", padx=5)
+        
+        # Analysis duration
+        ctk.CTkLabel(timing_inner, text="Thời gian phân tích (giây):", font=("Arial", 11, "bold")).grid(row=1, column=0, sticky="w", pady=8, padx=5)
+        analysis_duration_entry = ctk.CTkEntry(timing_inner, width=80)
+        analysis_duration_entry.insert(0, str(self.autokey_coords.get("analysis_duration", 30)))
+        analysis_duration_entry.grid(row=1, column=1, pady=8, padx=5)
+        
+        ctk.CTkLabel(timing_inner, text="(5-120s)", font=("Arial", 9), text_color="#888888").grid(row=1, column=2, sticky="w", padx=5)
 
         exit_action_var = ctk.StringVar(value=self.autokey_coords.get("cubase_exit_action", "dont_save"))
         
@@ -984,11 +1008,14 @@ class App(ctk.CTk):
         info_text = ctk.CTkTextbox(popup, height=80, width=500, fg_color="#2a2a2a")
         info_text.pack(pady=10, padx=20)
         info_text.insert("1.0",
-            "💡 Hướng dẫn:\n"
+            "💡 Hướng dẫn sử dụng Auto-Key:\n"
             "1. Mở cửa sổ Auto-Key Plugin trong Cubase\n"
-            "2. Click 'ĐO TỌA ĐỘ' bên cạnh nút muốn đo\n"
-            "3. Đợi cửa sổ Auto-Key hiện lên, sau đó click vào nút Listen/Send\n"
-            "4. Tọa độ sẽ tự động được tính và điền vào"
+            "2. Click 'ĐO TỌA ĐỘ' để lấy vị trí nút Listen/Send\n"
+            "3. Cài đặt thời gian nghe phù hợp (5-60s)\n"
+            "4. Cài đặt thời gian phân tích file âm thanh (5-120s)\n"
+            "5. Click 'LƯU' để áp dụng cài đặt\n\n"
+            "⏱️ Thời gian nghe: Thời gian plugin Auto-Key phân tích\n"
+            "🎵 Thời gian phân tích: Thời gian phân tích file âm thanh"
         )
         info_text.configure(state="disabled")
 
@@ -997,19 +1024,32 @@ class App(ctk.CTk):
 
         def save_coords():
             try:
+                # Validate timing values
+                listen_duration = int(listen_duration_entry.get())
+                analysis_duration = int(analysis_duration_entry.get())
+                
+                if not (5 <= listen_duration <= 60):
+                    tkinter.messagebox.showerror("Lỗi", "Thời gian nghe phải từ 5-60 giây!")
+                    return
+                    
+                if not (5 <= analysis_duration <= 120):
+                    tkinter.messagebox.showerror("Lỗi", "Thời gian phân tích phải từ 5-120 giây!")
+                    return
+
                 self.autokey_coords["listen_x_offset"] = float(listen_x_entry.get()) / 100
                 self.autokey_coords["listen_y_offset"] = float(listen_y_entry.get()) / 100
                 self.autokey_coords["send_x_offset"] = float(send_x_entry.get()) / 100
                 self.autokey_coords["send_y_from_bottom"] = int(send_y_entry.get())
                 self.autokey_coords["cubase_project_path"] = project_entry.get()
                 self.autokey_coords["cubase_exit_action"] = exit_action_var.get()
-                self.autokey_coords["listen_duration"] = int(listen_duration_entry.get())
+                self.autokey_coords["listen_duration"] = listen_duration
+                self.autokey_coords["analysis_duration"] = analysis_duration
 
                 if self.save_autokey_coords():
-                    tkinter.messagebox.showinfo("Thành công", "Đã lưu tọa độ Auto-Key!")
+                    tkinter.messagebox.showinfo("Thành công", "Đã lưu cài đặt Auto-Key!")
                     on_close_popup()
                 else:
-                    tkinter.messagebox.showerror("Lỗi", "Không thể lưu tọa độ!")
+                    tkinter.messagebox.showerror("Lỗi", "Không thể lưu cài đặt!")
             except ValueError:
                 tkinter.messagebox.showerror("Lỗi", "Vui lòng nhập số hợp lệ!")
 
@@ -1063,7 +1103,7 @@ class App(ctk.CTk):
 
             target_win = autokey_wins[0]
             WindowsHelper.activate_window(target_win['hwnd'])
-            time.sleep(0.5)
+            time.sleep(0.5)  # Fixed delay for window activation
 
             rect = target_win['rect']
             listen_x = rect['left'] + int(rect['width'] * self.autokey_coords["listen_x_offset"])
@@ -1075,17 +1115,23 @@ class App(ctk.CTk):
             WindowsHelper.click(listen_x, listen_y)
 
             duration = self.autokey_coords.get("listen_duration", 15)
-            print(f"Đang nghe ({duration}s)...")
-            time.sleep(duration)
+            print(f"⏱️ Đang nghe và phân tích ({duration}s)...")
+            
+            # Show countdown in console
+            for i in range(duration, 0, -1):
+                print(f"⏳ Còn {i}s...", end='\r')
+                time.sleep(1)
+            print("✅ Hoàn thành phân tích!")
 
             print(f"Click Send ({send_x}, {send_y})...")
             WindowsHelper.click(send_x, send_y)
+            time.sleep(0.3)  # Fixed delay after send
 
             WindowsHelper.set_cursor_pos(original_pos[0], original_pos[1])
-            print("✅ Xong quy trình!")
+            print("✅ Xong quy trình Auto-Key!")
 
         except Exception as e:
-            print(f"Lỗi: {e}")
+            print(f"❌ Lỗi Auto-Key: {e}")
         finally:
             cc = CC_MAP.get("DO_TONE")
             if cc: midi.send_cc(cc, 0)
@@ -1329,13 +1375,30 @@ class App(ctk.CTk):
             )
             self.essentia_thread.start()
             
-            # Wait a bit and check if server is running
+            # Wait a bit and check if server is running, then set default duration
             self.after(2000, self._check_essentia_startup)
+            self.after(3000, self._set_server_default_duration)
                 
         except Exception as e:
             print(f"[Essentia] Error starting server thread: {e}")
             import traceback
             traceback.print_exc()
+
+    def _set_server_default_duration(self):
+        """Set default analysis duration on server."""
+        try:
+            duration = self.autokey_coords.get("analysis_duration", 30)
+            response = requests.post(
+                f"http://127.0.0.1:{self.essentia_server_port}/set-default-duration",
+                json={"duration": duration},
+                timeout=5
+            )
+            if response.status_code == 200:
+                print(f"[Essentia] Set default analysis duration to {duration}s")
+            else:
+                print(f"[Essentia] Failed to set default duration: {response.text}")
+        except Exception as e:
+            print(f"[Essentia] Error setting default duration: {e}")
 
     def _check_essentia_startup(self):
         """Check if server started correctly after delay."""
@@ -1372,17 +1435,28 @@ class App(ctk.CTk):
         import shutil
         return shutil.which("ffmpeg") is not None or shutil.which("ffprobe") is not None
     
-    def detect_key_essentia(self, file_path):
-        """Detect key using Essentia server."""
+    def detect_key_essentia(self, file_path, duration=None):
+        """Detect key using Essentia server with configurable duration."""
         try:
+            # Use duration from autokey_coords or default to 30s
+            if duration is None:
+                duration = self.autokey_coords.get("analysis_duration", 30)
+                
+            payload = {
+                "filePath": file_path,
+                "duration": duration
+            }
+            
             response = requests.post(
                 f"http://127.0.0.1:{self.essentia_server_port}/detect-key",
-                json={"filePath": file_path},
-                timeout=60
+                json=payload,
+                timeout=max(60, duration + 10)  # Timeout based on duration
             )
             
             if response.status_code == 200:
                 result = response.json()
+                analyzed_duration = result.get("analyzedDuration", duration)
+                print(f"[Essentia] Analyzed {analyzed_duration}s of audio")
                 return result.get("key"), result.get("scale"), result.get("confidence", 0)
             else:
                 print(f"[Essentia] Detection failed: {response.text}")
@@ -1544,69 +1618,44 @@ class App(ctk.CTk):
             
             audio_path = None
             
-            # --- PHASE 1: CLOUD MP3 (Bypasses local FFmpeg need) ---
-            try:
-                import requests
-                api_url = "https://api.cobalt.tools/api/json"
-                payload = {"url": url, "downloadMode": "audio", "audioFormat": "mp3", "audioBitrate": "128"}
-                response = requests.post(api_url, headers={"Accept": "application/json", "Content-Type": "application/json"}, json=payload, timeout=12)
+            # --- LOCAL DOWNLOAD (Using yt-dlp only) ---
+            print("[YouTube] Downloading with yt-dlp...")
+            self.after(0, lambda: self.autokey_status_label.configure(text="● DOWNLOADING...", text_color="#ffa726"))
+            
+            import yt_dlp
+            quality = "128"
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'extractaudio': True,
+                'audioformat': 'mp3',
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'mp3',
+                    'preferredquality': quality,
+                }],
+                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                audio_path = ydl.prepare_filename(info)
                 
-                if response.status_code == 200:
-                    res_data = response.json()
-                    if res_data.get("status") != "error" and res_data.get("url"):
-                        dl_url = res_data.get("url")
-                        filename = res_data.get("filename", "youtube_audio.mp3")
-                        if not filename.endswith(".mp3"): filename += ".mp3"
-                        
-                        audio_path = os.path.join(temp_dir, filename)
-                        self.after(0, lambda: self.autokey_status_label.configure(text="● DOWNLOADING MP3...", text_color="#ffa726"))
-                        
-                        with requests.get(dl_url, stream=True, timeout=20) as r:
-                            r.raise_for_status()
-                            with open(audio_path, 'wb') as f:
-                                for chunk in r.iter_content(chunk_size=8192):
-                                    f.write(chunk)
-            except: pass # Silent fallback to local
-
-            # --- PHASE 2: LOCAL DOWNLOAD (Using your exact ydl_opts) ---
-            if not audio_path:
-                print("[YouTube] Falling back to local yt-dlp with user source opts")
-                self.after(0, lambda: self.autokey_status_label.configure(text="● LOCAL DOWNLOAD...", text_color="#ffa726"))
-                
-                import yt_dlp
-                quality = "128"
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'extractaudio': True,
-                    'audioformat': 'mp3',
-                    'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': quality,
-            }],
-                    'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                    'quiet': True,
-                    'no_warnings': True,
-                    'noplaylist': True,
-                }
-                
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=True)
-                    audio_path = ydl.prepare_filename(info)
-                    
-                    # Fix extension if yt_dlp kept webm/m4a
-                    if not os.path.exists(audio_path):
-                        exts = ['.mp3', '.m4a', '.webm', '.opus']
-                        base = os.path.splitext(audio_path)[0]
-                        for e in exts:
-                            if os.path.exists(base + e):
-                                audio_path = base + e
-                                break
+                # Fix extension if yt_dlp kept webm/m4a
+                if not os.path.exists(audio_path):
+                    exts = ['.mp3', '.m4a', '.webm', '.opus']
+                    base = os.path.splitext(audio_path)[0]
+                    for e in exts:
+                        if os.path.exists(base + e):
+                            audio_path = base + e
+                            break
 
             if not audio_path or not os.path.exists(audio_path):
                 raise Exception("Không thể lấy file âm thanh")
 
-            # --- PHASE 3: ANALYSIS ---
+            # --- ANALYSIS ---
             self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING TONE...", text_color="#ffa726"))
             
             key, scale, confidence = None, None, 0
