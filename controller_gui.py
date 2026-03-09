@@ -365,9 +365,11 @@ class App(ctk.CTk):
         self.load_settings()
         self.load_autokey_coords()
         self.create_desktop_shortcut() # Create shortcut on first run
-        self.start_essentia_server()
+        # Delay Essentia server start to reduce startup lag
+        self.after(2000, self.start_essentia_server)
         self.update_marquee() # Start marquee animation
-        self.after(1000, self.open_saved_project)
+        # Delay project opening to reduce startup lag
+        self.after(3000, self.open_saved_project)
 
     def open_saved_project(self):
         path = self.autokey_coords.get("cubase_project_path", "")
@@ -380,6 +382,11 @@ class App(ctk.CTk):
 
     def create_desktop_shortcut(self):
         """Create a desktop shortcut using PowerShell if it doesn't exist."""
+        # Run in background thread to avoid blocking UI
+        threading.Thread(target=self._create_shortcut_worker, daemon=True).start()
+    
+    def _create_shortcut_worker(self):
+        """Worker thread for creating desktop shortcut."""
         try:
             if not getattr(sys, 'frozen', False):
                 return # Only create shortcut for bundled EXE
@@ -402,7 +409,7 @@ class App(ctk.CTk):
                 f'$s.WorkingDirectory="{os.path.dirname(exe_path)}";'
                 f'$s.Save()'
             )
-            subprocess.run(["powershell", "-Command", shell_cmd], capture_output=True)
+            subprocess.run(["powershell", "-Command", shell_cmd], capture_output=True, timeout=5)
             print("[Shortcut] Shortcut created successfully")
         except Exception as e:
             print(f"[Shortcut] Failed to create shortcut: {e}")
@@ -740,19 +747,33 @@ class App(ctk.CTk):
             with open("config.json", "r", encoding='utf-8') as f:
                 data = json.load(f)
 
+            # Load sliders without sending MIDI (faster startup)
             sliders_data = data.get("sliders", {})
             for k, v in sliders_data.items():
                 if k in self.slider_widgets:
                     self.slider_widgets[k].set(v)
-                    self.on_slider_change(v, k)
+                    # Update label only, skip MIDI during startup
+                    if k in self.slider_labels:
+                        percent = int((v / 127) * 100)
+                        self.slider_labels[k].configure(text=f"{percent}%")
+
+            # Send all MIDI values at once after UI is ready
+            self.after(500, lambda: self._send_startup_midi(sliders_data))
 
             toggles_data = data.get("toggles", {})
             for k, v in toggles_data.items():
-                if k in self.btn_widgets and k not in ["DO_TONE", "SAVE"]:
+                if k in self.btn_widgets and k not in ["DO_TONE", "SAVE", "AUTO_KEY_DETECT", "AUTO_DO_TONE", "YOUTUBE_BROWSER", "SETTINGS"]:
                     if self.btn_states.get(k, False) != v:
                          self.on_btn_toggle(k)
         except Exception as e:
             print(f"Lỗi load config: {e}")
+    
+    def _send_startup_midi(self, sliders_data):
+        """Send MIDI values after startup to avoid lag."""
+        for k, v in sliders_data.items():
+            cc = CC_MAP.get(k)
+            if cc:
+                midi.send_cc(cc, v)
 
     def load_autokey_coords(self):
         if not os.path.exists("autokey_coords.json"):
@@ -1495,20 +1516,27 @@ class App(ctk.CTk):
             
             print("[YouTube Browser] Starting Chrome...")
             
-            # Setup Chrome options
+            # Setup Chrome options - use separate profile for automation with extensions
             chrome_options = Options()
-            chrome_options.add_argument("--start-maximized")
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', True)
+            chrome_options.add_experimental_option('useAutomationExtension', False)
+            
+            # Use a separate profile directory for automation (to avoid conflicts)
+            # This profile will persist extensions you install in it
+            automation_profile_dir = os.path.join(os.path.dirname(__file__), "chrome_automation_profile")
+            chrome_options.add_argument(f"--user-data-dir={automation_profile_dir}")
+            chrome_options.add_argument("--profile-directory=Default")
+            print(f"[YouTube Browser] Using automation profile: {automation_profile_dir}")
+            print("[YouTube Browser] Tip: Install extensions in this browser window, they will be saved for next time")
             
             # Try to find Chrome/Brave
             chrome_paths = [
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
                 r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
                 r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
                 r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
             ]
             
             chrome_binary = None
@@ -1522,15 +1550,30 @@ class App(ctk.CTk):
                 print(f"[YouTube Browser] Using browser: {chrome_binary}")
             
             # Create driver
+            print("[YouTube Browser] Creating WebDriver...")
             self.youtube_browser = webdriver.Chrome(options=chrome_options)
+            print("[YouTube Browser] WebDriver created")
+            
+            # Set small window size immediately (before loading page)
+            try:
+                window_width = 800
+                window_height = 600
+                self.youtube_browser.set_window_size(window_width, window_height)
+                print(f"[YouTube Browser] Set size: {window_width}x{window_height}")
+            except Exception as e:
+                print(f"[YouTube Browser] Could not set window size: {e}")
             
             # Open YouTube homepage
+            print("[YouTube Browser] Opening YouTube...")
             self.youtube_browser.get("https://www.youtube.com")
             
-            print("[YouTube Browser] Opened YouTube")
+            # Wait for page load
+            time.sleep(3)
+            print(f"[YouTube Browser] Current URL: {self.youtube_browser.current_url}")
+            
+            print("[YouTube Browser] ✅ YouTube opened successfully")
             
             # Auto-enable monitoring
-            # self.auto_detect_enabled = True # Removed: Detection should only follow AUTO-KEY button
             self.youtube_monitor_active = True
             
             # Start monitoring thread
@@ -1539,34 +1582,34 @@ class App(ctk.CTk):
                 daemon=True
             )
             self.youtube_monitor_thread.start()
+            print("[YouTube Browser] Monitor started")
             
-            # Show notification - REMOVED AS REQUESTED
-            # self.after(0, lambda: tkinter.messagebox.showinfo(
-            #     "YouTube Auto Detector",
-            #     "✅ Đã bật tự động phát hiện!\n\n"
-            #     "Click vào video YouTube để tự động phát hiện key.\n\n"
-            #     "Kết quả sẽ hiển thị trên panel AUTO-KEY."
-            # ))
+            # Don't show popup - just log success
+            print("[YouTube Browser] ✅ Ready! Open a video to auto-detect key")
             
         except Exception as e:
-            print(f"[YouTube Browser] Error: {e}")
+            print(f"[YouTube Browser] ❌ Error: {e}")
             import traceback
             traceback.print_exc()
             
             self.after(0, lambda: tkinter.messagebox.showerror(
                 "Lỗi",
-                f"Không thể mở trình duyệt:\n{e}\n\nVui lòng cài đặt:\npip install selenium"
+                f"Không thể mở trình duyệt:\n{e}\n\n"
+                "Kiểm tra:\n"
+                "1. Đã cài Chrome/Brave\n"
+                "2. Đã cài: pip install selenium\n"
+                "3. Đóng tất cả Chrome đang mở"
             ))
     
     def _monitor_youtube_url(self):
-        """Monitor YouTube URL changes and auto-detect."""
+        """Monitor YouTube URL changes and auto-detect (optimized to reduce lag)."""
         print("[YouTube Monitor] Started")
         
         while self.youtube_monitor_active and self.youtube_browser:
             try:
                 # Only proceed if AUTO-KEY is ON (autokey_running) OR AUTO DO TONE is ON
                 if not self.autokey_running and not self.auto_do_tone_enabled:
-                    time.sleep(1)
+                    time.sleep(2)  # Sleep longer when not active (reduced CPU)
                     continue
                 
                 current_url = self.youtube_browser.current_url
@@ -1584,7 +1627,7 @@ class App(ctk.CTk):
                         ))
                         
                         # Wait a bit for video to load
-                        time.sleep(2)
+                        time.sleep(3)
                         
                         # Start detection or auto do tone
                         if self.autokey_running:
@@ -1596,11 +1639,12 @@ class App(ctk.CTk):
                         
                         # Wait before next check
                         time.sleep(5)
-                time.sleep(1)  # Check every second
+                        
+                time.sleep(2)  # Check every 2 seconds instead of 1 (reduced CPU)
                 
             except Exception as e:
                 print(f"[YouTube Monitor] Error: {e}")
-                time.sleep(2)
+                time.sleep(3)
         
         print("[YouTube Monitor] Stopped")
     
@@ -1696,17 +1740,27 @@ class App(ctk.CTk):
     def on_closing(self):
         print("\n🛑 Đang bắt đầu quy trình tắt...")
         
-        # Stop YouTube monitoring
+        # Stop YouTube monitoring first (stop threads immediately)
         self.youtube_monitor_active = False
         self.auto_detect_enabled = False
         
-        # Close YouTube browser
+        # Close YouTube browser quickly (don't wait)
         if self.youtube_browser:
             try:
-                print("[YouTube Browser] Closing...")
-                self.youtube_browser.quit()
-            except:
-                pass
+                print("[YouTube Browser] Closing browser...")
+                # Use a thread to close browser so it doesn't block
+                def close_browser():
+                    try:
+                        self.youtube_browser.quit()
+                    except:
+                        pass
+                
+                close_thread = threading.Thread(target=close_browser, daemon=True)
+                close_thread.start()
+                # Don't wait for it, just continue
+                print("[YouTube Browser] Close initiated")
+            except Exception as e:
+                print(f"[YouTube Browser] Error closing: {e}")
         
         # Stop Essentia server
         self.stop_essentia_server()
@@ -1746,10 +1800,10 @@ class App(ctk.CTk):
                 user32.keybd_event(VK_Q, 0, KEYEVENTF_KEYUP, 0) # Q up
                 user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0) # Ctrl up
 
-                # 2. Đợi hộp thoại "Save" hiện lên
-                print("⏳ Đang đợi hộp thoại xác nhận 'Save' (tối đa 5s)...")
+                # 2. Đợi hộp thoại "Save" hiện lên (giảm thời gian chờ)
+                print("⏳ Đang đợi hộp thoại xác nhận 'Save' (tối đa 2s)...")
                 found_dialog = False
-                for i in range(50):
+                for i in range(20):  # Giảm từ 50 xuống 20 (2 giây thay vì 5 giây)
                     time.sleep(0.1)
                     # Tìm cửa sổ có tiêu đề "Cubase Pro" hoặc "Cubase" mà không phải cửa sổ chính
                     dialogs = WindowsHelper.find_windows_by_title('Cubase')
@@ -1793,7 +1847,7 @@ class App(ctk.CTk):
                                 
                                 print("✅ Đã chọn 'Don't Save'")
                             found_dialog = True
-                            time.sleep(0.05) # Đợi Cubase đóng hẳn
+                            time.sleep(0.1)  # Giảm từ 0.05 xuống 0.1
                             break
                     if found_dialog: break
                 
@@ -1804,7 +1858,14 @@ class App(ctk.CTk):
             print(f"❌ Lỗi khi đóng Cubase: {e}")
 
         print("👋 Đang đóng Tool...")
-        self.destroy()
+        
+        # Force exit immediately without waiting
+        try:
+            self.destroy()
+        except:
+            pass
+        
+        # Force kill process
         os._exit(0)
 
     def detect_audio_file(self):

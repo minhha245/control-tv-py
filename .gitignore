@@ -42,6 +42,7 @@ license.dat
 config.json
 autokey_coords.json
 youtube_tabs.json
+chrome_automation_profile/
 
 # Temporary files
 temp_youtube/
