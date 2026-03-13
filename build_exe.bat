@@ -44,25 +44,37 @@ C:\Python311\python.exe -m PyInstaller ^
  --add-data "autokey_tool;autokey_tool" ^
  --add-data "essentia-key-detector;essentia-key-detector" ^
  --collect-all librosa ^
+ --collect-all numpy ^
+ --collect-all scipy ^
  --collect-all pyaudiowpatch ^
  --collect-all soundfile ^
  --collect-all audioread ^
  --collect-all soxr ^
  --hidden-import=flask ^
  --hidden-import=flask_cors ^
+ --hidden-import=yt_dlp ^
+ --hidden-import=yt_dlp.utils ^
+ --hidden-import=yt_dlp.extractor ^
  --hidden-import=pkg_resources.extern ^
  --hidden-import=sklearn.utils._typedefs ^
  --hidden-import=sklearn.neighbors._partition_nodes ^
+ --hidden-import=scipy ^
  --hidden-import=scipy.signal ^
  --hidden-import=scipy.fft ^
  --hidden-import=scipy.ndimage ^
+ --hidden-import=scipy.spatial ^
+ --hidden-import=numpy ^
  --hidden-import=numba ^
+ --hidden-import=librosa ^
+ --hidden-import=librosa.display ^
+ --hidden-import=audio_server ^
  --exclude-module tkinter.test ^
  --exclude-module cv2 ^
  --exclude-module pyautogui ^
  --exclude-module pygetwindow ^
  --exclude-module matplotlib ^
  --exclude-module PIL ^
+ --exclude-module wx ^
  %MAIN_PY%
 
 if %errorlevel% neq 0 (

@@ -309,7 +309,11 @@ def run_server(port=5000):
     # Ensure port is free BEFORE running in a thread if we're not already the main process handling it
     kill_port(port)
     print(f'Starting Audio Processing Server on http://localhost:{port}')
-    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False)
+    # Suppress Flask startup messages
+    import logging
+    log = logging.getLogger('werkzeug')
+    log.setLevel(logging.ERROR)
+    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False, threaded=True)
 
 if __name__ == '__main__':
     run_server(5000)

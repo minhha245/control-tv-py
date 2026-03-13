@@ -3,8 +3,12 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('autokey_tool', 'autokey_tool'), ('essentia-key-detector', 'essentia-key-detector')]
 binaries = []
-hiddenimports = ['flask', 'flask_cors', 'pkg_resources.extern', 'sklearn.utils._typedefs', 'sklearn.neighbors._partition_nodes', 'scipy.signal', 'scipy.fft', 'scipy.ndimage', 'numba']
+hiddenimports = ['flask', 'flask_cors', 'yt_dlp', 'yt_dlp.utils', 'yt_dlp.extractor', 'pkg_resources.extern', 'sklearn.utils._typedefs', 'sklearn.neighbors._partition_nodes', 'scipy', 'scipy.signal', 'scipy.fft', 'scipy.ndimage', 'scipy.spatial', 'numpy', 'numba', 'librosa', 'librosa.display', 'audio_server']
 tmp_ret = collect_all('librosa')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('numpy')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('scipy')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('pyaudiowpatch')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -25,7 +29,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter.test', 'cv2', 'pyautogui', 'pygetwindow', 'matplotlib', 'PIL'],
+    excludes=['tkinter.test', 'cv2', 'pyautogui', 'pygetwindow', 'matplotlib', 'PIL', 'wx'],
     noarchive=False,
     optimize=0,
 )
@@ -36,7 +40,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='BangDieuKhienAudio_v22',
+    name='BangDieuKhienAudio_v25',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -56,5 +60,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='BangDieuKhienAudio_v22',
+    name='BangDieuKhienAudio_v25',
 )

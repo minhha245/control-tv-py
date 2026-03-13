@@ -365,8 +365,8 @@ class App(ctk.CTk):
         self.load_settings()
         self.load_autokey_coords()
         self.create_desktop_shortcut() # Create shortcut on first run
-        # Delay Essentia server start to reduce startup lag
-        self.after(2000, self.start_essentia_server)
+        # Start Essentia server immediately with timeout handling
+        threading.Thread(target=self.start_essentia_server, daemon=True).start()
         self.update_marquee() # Start marquee animation
         # Delay project opening to reduce startup lag
         self.after(3000, self.open_saved_project)
@@ -1367,43 +1367,93 @@ class App(ctk.CTk):
 
     # === ESSENTIA KEY DETECTOR INTEGRATION ===
     def start_essentia_server(self):
-        """Start Essentia Python server in a background thread."""
-        try:
-            print("[Essentia] Integrating audio server as thread...")
-            # Detect search path for bundled data
-            base_path = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
-            essentia_path = os.path.join(base_path, "essentia-key-detector")
-            
-            if essentia_path not in sys.path:
-                sys.path.append(essentia_path)
-            
-            print(f"[Essentia] Loading server from: {essentia_path}")
-            
+        """Start Essentia Python server in a background thread with retry logic."""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
             try:
-                from audio_server import run_server
-            except ImportError as e:
-                print(f"[Essentia] Import error: {e}")
-                # Try fallback if package name mismatch
-                try:
-                    from essentia_key_detector.audio_server import run_server
-                except:
-                    raise e
-            
-            # Run server in background thread
-            self.essentia_thread = threading.Thread(
-                target=lambda: run_server(self.essentia_server_port),
-                daemon=True
-            )
-            self.essentia_thread.start()
-            
-            # Wait a bit and check if server is running, then set default duration
-            self.after(2000, self._check_essentia_startup)
-            self.after(3000, self._set_server_default_duration)
+                print(f"[Essentia] Starting server (attempt {retry_count + 1}/{max_retries})...")
                 
-        except Exception as e:
-            print(f"[Essentia] Error starting server thread: {e}")
-            import traceback
-            traceback.print_exc()
+                # Detect search path for bundled data
+                if getattr(sys, 'frozen', False):
+                    # Running as bundled exe
+                    base_path = sys._MEIPASS
+                    print(f"[Essentia] Running as bundled exe, base path: {base_path}")
+                else:
+                    # Running as script
+                    base_path = os.path.dirname(os.path.abspath(__file__))
+                    print(f"[Essentia] Running as script, base path: {base_path}")
+                
+                essentia_path = os.path.join(base_path, "essentia-key-detector")
+                
+                # Check if essentia-key-detector folder exists
+                if not os.path.exists(essentia_path):
+                    print(f"[Essentia] ERROR: Folder not found at {essentia_path}")
+                    try:
+                        print(f"[Essentia] Contents of base_path: {os.listdir(base_path)}")
+                    except:
+                        pass
+                    raise Exception(f"essentia-key-detector folder not found at {essentia_path}")
+                
+                # Check if audio_server.py exists
+                audio_server_file = os.path.join(essentia_path, "audio_server.py")
+                if not os.path.exists(audio_server_file):
+                    print(f"[Essentia] ERROR: audio_server.py not found at {audio_server_file}")
+                    try:
+                        print(f"[Essentia] Contents of essentia folder: {os.listdir(essentia_path)}")
+                    except:
+                        pass
+                    raise Exception(f"audio_server.py not found at {audio_server_file}")
+                
+                if essentia_path not in sys.path:
+                    sys.path.insert(0, essentia_path)
+                
+                print(f"[Essentia] Loading server from: {essentia_path}")
+                
+                try:
+                    from audio_server import run_server
+                    print("[Essentia] Successfully imported audio_server.run_server")
+                except ImportError as e:
+                    print(f"[Essentia] Direct import failed: {e}")
+                    
+                    # Try fallback if package name mismatch
+                    try:
+                        from essentia_key_detector.audio_server import run_server
+                        print("[Essentia] Successfully imported via essentia_key_detector package")
+                    except Exception as e2:
+                        print(f"[Essentia] Package import also failed: {e2}")
+                        raise e2
+                
+                # Run server in background thread
+                self.essentia_thread = threading.Thread(
+                    target=lambda: run_server(self.essentia_server_port),
+                    daemon=True
+                )
+                self.essentia_thread.start()
+                print("[Essentia] Server thread started, waiting for initialization...")
+                
+                # Wait for server to be ready
+                for wait_count in range(20):  # Wait up to 10 seconds
+                    time.sleep(0.5)
+                    if self.check_essentia_server():
+                        print("[Essentia] ✅ Server ready and responding")
+                        self.after(1000, self._set_server_default_duration)
+                        return
+                
+                print(f"[Essentia] WARNING: Server started but not responding after 10s")
+                return
+                    
+            except Exception as e:
+                retry_count += 1
+                print(f"[Essentia] Error (attempt {retry_count}): {e}")
+                if retry_count < max_retries:
+                    print(f"[Essentia] Retrying in 2 seconds...")
+                    time.sleep(2)
+                else:
+                    print(f"[Essentia] ❌ Failed to start after {max_retries} attempts")        
+                    import traceback
+                    traceback.print_exc()
 
     def _set_server_default_duration(self):
         """Set default analysis duration on server."""
@@ -1649,7 +1699,7 @@ class App(ctk.CTk):
         print("[YouTube Monitor] Stopped")
     
     def _detect_youtube_url(self, url):
-        """Detect key from YouTube URL using Cloud MP3 or Local Download."""
+        """Detect key from YouTube URL using Cloud MP3 or Local Download with fallback."""
         try:
             # Update status
             self.after(0, lambda: self.autokey_status_label.configure(text="● CONNECTING...", text_color="#ffa726"))
@@ -1666,7 +1716,13 @@ class App(ctk.CTk):
             print("[YouTube] Downloading with yt-dlp...")
             self.after(0, lambda: self.autokey_status_label.configure(text="● DOWNLOADING...", text_color="#ffa726"))
             
-            import yt_dlp
+            try:
+                import yt_dlp
+            except ImportError:
+                print("[YouTube] ERROR: yt_dlp not installed")
+                self.after(0, lambda: self.autokey_status_label.configure(text="● MISSING TOOL", text_color="#d32f2f"))
+                raise Exception("yt_dlp not installed")
+            
             quality = "128"
             ydl_opts = {
                 'format': 'bestaudio/best',
@@ -1703,10 +1759,17 @@ class App(ctk.CTk):
             self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING TONE...", text_color="#ffa726"))
             
             key, scale, confidence = None, None, 0
-            if self.check_essentia_server():
-                key, scale, confidence = self.detect_key_essentia(audio_path)
             
+            # Try Essentia server first
+            if self.check_essentia_server():
+                print("[YouTube] Using Essentia server")
+                key, scale, confidence = self.detect_key_essentia(audio_path)
+            else:
+                print("[YouTube] Essentia server not available, using fallback")
+            
+            # Use fallback if essentia failed or unavailable
             if not key or not scale:
+                print("[YouTube] Trying fallback detection...")
                 key, scale, confidence = self._detect_key_fallback(audio_path)
             
             # Clean up
@@ -1715,7 +1778,8 @@ class App(ctk.CTk):
             
             if key and scale:
                 self.after(0, lambda: self._update_autokey_display(key, scale, confidence / 100.0, 1.0))
-                self.after(0, lambda: self.autokey_status_label.configure(text="● DONE", text_color="#4caf50"))
+                method = "ESSENTIA" if self.check_essentia_server() else "FALLBACK"
+                self.after(0, lambda: self.autokey_status_label.configure(text=f"● DONE ({method})", text_color="#4caf50"))
             else:
                 self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
                 
@@ -1734,8 +1798,66 @@ class App(ctk.CTk):
         pass
     
     def _detect_key_fallback(self, audio_path):
-        """No fallback available (legacy KeyDetector removed)."""
-        return None, None, 0
+        """Fallback key detection using librosa and Krumhansl-Schmuckler algorithm."""
+        try:
+            import librosa
+            import numpy as np
+            
+            print("[Fallback] Using librosa-based key detection...")
+            
+            # Load audio
+            y, sr = librosa.load(audio_path, sr=22050, duration=30)
+            
+            # Extract chroma features (energy of each pitch class)
+            chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
+            
+            # Compute mean chroma across time
+            chroma_mean = np.mean(chroma, axis=1)
+            
+            # Krumhansl-Kessler key profiles
+            KK_MAJOR = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+            KK_MINOR = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+            
+            NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+            
+            # Find best matching key
+            best_key = None
+            best_scale = None
+            best_corr = -1
+            
+            # Normalize chroma
+            chroma_norm = chroma_mean / (np.sum(chroma_mean) + 1e-10)
+            
+            for tonic in range(12):
+                # Test Major
+                major_profile = np.roll(KK_MAJOR, tonic)
+                major_corr = np.corrcoef(chroma_norm, major_profile)[0, 1]
+                
+                if major_corr > best_corr:
+                    best_corr = major_corr
+                    best_key = NOTE_NAMES[tonic]
+                    best_scale = 'Major'
+                
+                # Test Minor
+                minor_profile = np.roll(KK_MINOR, tonic)
+                minor_corr = np.corrcoef(chroma_norm, minor_profile)[0, 1]
+                
+                if minor_corr > best_corr:
+                    best_corr = minor_corr
+                    best_key = NOTE_NAMES[tonic]
+                    best_scale = 'Minor'
+            
+            # Calculate confidence (0-100)
+            confidence = max(0, min(100, (best_corr + 1) * 50))  # Convert -1..1 to 0..100
+            
+            print(f"[Fallback] Detected: {best_key} {best_scale} (confidence: {confidence:.1f}%)")
+            return best_key, best_scale, confidence
+            
+        except Exception as e:
+            print(f"[Fallback] Error in fallback detection: {e}")
+            import traceback
+            traceback.print_exc()
+            return None, None, 0
 
     def on_closing(self):
         print("\n🛑 Đang bắt đầu quy trình tắt...")
@@ -1889,11 +2011,10 @@ class App(ctk.CTk):
             threading.Thread(target=self._process_audio_file_worker, args=(file_path,), daemon=True).start()
 
     def _process_audio_file_worker(self, file_path):
-        """Worker thread to process audio file."""
+        """Worker thread to process audio file with fallback support."""
         import os
         import tempfile
         import shutil
-        import librosa
         filename = os.path.basename(file_path)
         temp_path = None
         
@@ -1902,25 +2023,34 @@ class App(ctk.CTk):
             self.after(0, lambda: self.detected_key_label.configure(text="..."))
             self.after(0, lambda: self.detected_scale_label.configure(text="Đang xử lý..."))
             
-            # Check if Essentia server is available - prioritize it as requested
+            key, mode, conf = None, None, 0
+            method = "UNKNOWN"
+            
+            # Try Essentia server first
             if self.check_essentia_server():
                 print(f"[Auto-Key] Using Essentia server for file: {file_path}")
                 self.after(0, lambda: self.autokey_status_label.configure(text="● SERVER ANALYZING...", text_color="#ffa726"))
                 
                 key, mode, conf = self.detect_key_essentia(file_path)
+                method = "ESSENTIA"
+            
+            # Use fallback if Essentia not available or failed
+            if not key or not mode:
+                print(f"[Auto-Key] Essentia not available, using fallback for: {file_path}")
+                self.after(0, lambda: self.autokey_status_label.configure(text="● FALLBACK ANALYZING...", text_color="#ffa726"))
                 
-                if key and mode:
-                    # Update UI
-                    self.after(0, lambda: self._update_autokey_display(key, mode, conf/100.0, 1.0))
-                    self.after(0, lambda: self.autokey_status_label.configure(text="● DONE (ESSENTIA)", text_color="#4caf50"))
-                    
-                    # Send to MIDI
-                    self.send_autokey_midi(key, mode)
-                else:
-                    self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
+                key, mode, conf = self._detect_key_fallback(file_path)
+                method = "FALLBACK"
+            
+            if key and mode:
+                # Update UI
+                self.after(0, lambda: self._update_autokey_display(key, mode, conf/100.0, 1.0))
+                self.after(0, lambda: self.autokey_status_label.configure(text=f"● DONE ({method})", text_color="#4caf50"))
+                
+                # Send to MIDI
+                self.send_autokey_midi(key, mode)
             else:
-                self.after(0, lambda: tkinter.messagebox.showerror("Lỗi", "Essentia server chưa chạy! Không thể phân tích file."))
-                self.after(0, lambda: self.autokey_status_label.configure(text="● SERVER OFF", text_color="#d32f2f"))
+                self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
                 
         except Exception as e:
             print(f"[Auto-Key] File error: {e}")
