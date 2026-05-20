@@ -346,6 +346,9 @@ class App(ctk.CTk):
         self.youtube_panel = None  # Control panel window
         self.last_youtube_url = None  # Track last detected URL
         self.auto_detect_enabled = False  # Auto-detect flag
+        self.youtube_key_timeline = []  # [(start_sec, end_sec, key, scale, conf), ...]
+        self.youtube_sync_active = False  # Time sync with YouTube playback
+        self.youtube_browser_opening = False  # Prevent double-open while starting
         
         # Marquee UI state
         self.marquee_text = "   BẢNG ĐIỀU KHIỂN TIẾNG VIỆT  ★  HẬU SETUP LIVE STUDIO  ★   "
@@ -581,8 +584,17 @@ class App(ctk.CTk):
 
         # Confidence bar
         self.autokey_confidence_bar = ctk.CTkProgressBar(autokey_frame, height=6, progress_color="#00bcd4")
-        self.autokey_confidence_bar.pack(pady=(0, 4), padx=10, fill="x")
+        self.autokey_confidence_bar.pack(pady=(0, 2), padx=10, fill="x")
         self.autokey_confidence_bar.set(0)
+
+        # Playback time display
+        self.youtube_time_label = ctk.CTkLabel(
+            autokey_frame,
+            text="",
+            font=("Arial", 9),
+            text_color="#888888"
+        )
+        self.youtube_time_label.pack(pady=(0, 4))
 
         # Audio source selection removed as requested
 
@@ -1273,10 +1285,12 @@ class App(ctk.CTk):
         if btn:
             btn.configure(text="AUTO-KEY", fg_color=orig_color, text_color="white")
         
+        self.youtube_sync_active = False
         self.autokey_status_label.configure(text="● OFF", text_color="#d32f2f")
         self.detected_key_label.configure(text="---")
         self.detected_scale_label.configure(text="")
         self.autokey_confidence_bar.set(0)
+        self.youtube_time_label.configure(text="")
     
     def send_autokey_midi(self, key_str, scale_str):
         if not key_str or not scale_str: return
@@ -1538,6 +1552,80 @@ class App(ctk.CTk):
             return None, None, 0
     
     # === YOUTUBE BROWSER INTEGRATION ===
+    def _is_youtube_browser_alive(self):
+        """Check if the Selenium browser window is still open."""
+        try:
+            if self.youtube_browser is None:
+                return False
+            _ = self.youtube_browser.current_url
+            return True
+        except Exception:
+            return False
+
+    def _reset_youtube_browser_state(self):
+        """Reset all YouTube browser state after browser is closed."""
+        self.youtube_monitor_active = False
+        self.youtube_sync_active = False
+        self.youtube_browser_opening = False
+        self.youtube_browser = None
+        self.last_youtube_url = None
+        self.youtube_key_timeline = []
+        self.after(0, lambda: self.youtube_time_label.configure(text=""))
+        orig_color = self.btn_colors.get("YOUTUBE_BROWSER", "#ff0000")
+        btn = self.btn_widgets.get("YOUTUBE_BROWSER")
+        if btn:
+            self.after(0, lambda: btn.configure(
+                text="YOUTUBE", fg_color=orig_color, state="normal"
+            ))
+        print("[YouTube Browser] State reset")
+
+    def _find_available_browsers(self):
+        """Return list of (name, path) for installed Chrome/Brave."""
+        candidates = [
+            ("Chrome", r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+            ("Chrome", r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"),
+            ("Chrome", os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe")),
+            ("Brave",  r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"),
+            ("Brave",  r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe"),
+        ]
+        found, seen = [], set()
+        for name, path in candidates:
+            if os.path.exists(path) and name not in seen:
+                found.append((name, path))
+                seen.add(name)
+        return found
+
+    def _ask_browser_choice(self, browsers):
+        """Show popup to choose browser. Returns path or None if cancelled."""
+        result = [None]
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Chọn trình duyệt")
+        dialog.geometry("300x140")
+        dialog.resizable(False, False)
+        dialog.configure(fg_color="#1a1a1a")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.focus_force()
+        dialog.lift()
+
+        ctk.CTkLabel(dialog, text="Chọn trình duyệt để mở YouTube:",
+                     font=("Arial", 11)).pack(pady=(20, 12))
+
+        btn_frame = ctk.CTkFrame(dialog, fg_color="transparent")
+        btn_frame.pack()
+
+        for name, path in browsers:
+            color = "#ff6d00" if "brave" in name.lower() else "#1565c0"
+            def on_click(p=path):
+                result[0] = p
+                dialog.destroy()
+            ctk.CTkButton(btn_frame, text=name, fg_color=color, width=110, height=35,
+                          font=("Arial", 11, "bold"), command=on_click).pack(side="left", padx=8)
+
+        self.wait_window(dialog)
+        return result[0]
+
     def open_youtube_browser(self):
         """Open YouTube in Selenium browser with auto URL monitoring."""
         if not selenium_available:
@@ -1546,58 +1634,68 @@ class App(ctk.CTk):
                 "Chưa cài đặt Selenium!\n\nVui lòng cài đặt:\npip install selenium"
             )
             return
-        
-        # Check if already running
+
+        # Block if browser is currently being opened
+        if self.youtube_browser_opening:
+            return
+
+        # If browser was closed by user, reset state so we can reopen
+        if self.youtube_browser and not self._is_youtube_browser_alive():
+            self._reset_youtube_browser_state()
+
+        # Already running and alive
         if self.youtube_browser and self.youtube_monitor_active:
             tkinter.messagebox.showinfo(
                 "Thông báo",
                 "YouTube Auto Detector đang chạy!\n\nClick vào video để tự động phát hiện key."
             )
             return
-        
-        # Start browser in thread
-        threading.Thread(target=self._start_youtube_browser_worker, daemon=True).start()
-    
-    def _start_youtube_browser_worker(self):
+
+        # Find installed browsers
+        browsers = self._find_available_browsers()
+        if not browsers:
+            tkinter.messagebox.showerror(
+                "Lỗi",
+                "Không tìm thấy Chrome hoặc Brave!\nHãy cài đặt một trong hai trình duyệt."
+            )
+            return
+
+        # Ask user if multiple browsers found
+        if len(browsers) == 1:
+            chrome_binary = browsers[0][1]
+        else:
+            chrome_binary = self._ask_browser_choice(browsers)
+            if not chrome_binary:
+                return
+
+        # Lock button while opening
+        self.youtube_browser_opening = True
+        btn = self.btn_widgets.get("YOUTUBE_BROWSER")
+        if btn:
+            btn.configure(text="ĐANG MỞ...", fg_color="#555555", state="disabled")
+
+        threading.Thread(target=self._start_youtube_browser_worker,
+                         args=(chrome_binary,), daemon=True).start()
+
+    def _start_youtube_browser_worker(self, chrome_binary):
         """Worker thread to start YouTube browser."""
         try:
-            if self.youtube_browser:
-                return
-            
-            print("[YouTube Browser] Starting Chrome...")
-            
-            # Setup Chrome options - use separate profile for automation with extensions
+            browser_name = "Brave" if "brave" in chrome_binary.lower() else "Chrome"
+            print(f"[YouTube Browser] Starting {browser_name}: {chrome_binary}")
+
             chrome_options = Options()
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
             chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            # Use a separate profile directory for automation (to avoid conflicts)
-            # This profile will persist extensions you install in it
-            automation_profile_dir = os.path.join(os.path.dirname(__file__), "chrome_automation_profile")
+
+            # Separate profile per browser so extensions are saved independently
+            profile_folder = "brave_automation_profile" if "brave" in chrome_binary.lower() \
+                             else "chrome_automation_profile"
+            automation_profile_dir = os.path.join(os.path.dirname(__file__), profile_folder)
             chrome_options.add_argument(f"--user-data-dir={automation_profile_dir}")
             chrome_options.add_argument("--profile-directory=Default")
-            print(f"[YouTube Browser] Using automation profile: {automation_profile_dir}")
-            print("[YouTube Browser] Tip: Install extensions in this browser window, they will be saved for next time")
-            
-            # Try to find Chrome/Brave
-            chrome_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
-                r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-                r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-            ]
-            
-            chrome_binary = None
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    chrome_binary = path
-                    break
-            
-            if chrome_binary:
-                chrome_options.binary_location = chrome_binary
-                print(f"[YouTube Browser] Using browser: {chrome_binary}")
+            chrome_options.binary_location = chrome_binary
+            print(f"[YouTube Browser] Profile: {automation_profile_dir}")
             
             # Create driver
             print("[YouTube Browser] Creating WebDriver...")
@@ -1634,14 +1732,13 @@ class App(ctk.CTk):
             self.youtube_monitor_thread.start()
             print("[YouTube Browser] Monitor started")
             
-            # Don't show popup - just log success
             print("[YouTube Browser] ✅ Ready! Open a video to auto-detect key")
-            
+
         except Exception as e:
             print(f"[YouTube Browser] ❌ Error: {e}")
             import traceback
             traceback.print_exc()
-            
+            self.youtube_browser = None
             self.after(0, lambda: tkinter.messagebox.showerror(
                 "Lỗi",
                 f"Không thể mở trình duyệt:\n{e}\n\n"
@@ -1650,6 +1747,16 @@ class App(ctk.CTk):
                 "2. Đã cài: pip install selenium\n"
                 "3. Đóng tất cả Chrome đang mở"
             ))
+
+        finally:
+            # Always unlock button after opening attempt (success or fail)
+            self.youtube_browser_opening = False
+            orig_color = self.btn_colors.get("YOUTUBE_BROWSER", "#ff0000")
+            btn = self.btn_widgets.get("YOUTUBE_BROWSER")
+            if btn:
+                self.after(0, lambda: btn.configure(
+                    text="YOUTUBE", fg_color=orig_color, state="normal"
+                ))
     
     def _monitor_youtube_url(self):
         """Monitor YouTube URL changes and auto-detect (optimized to reduce lag)."""
@@ -1681,6 +1788,7 @@ class App(ctk.CTk):
                         
                         # Start detection or auto do tone
                         if self.autokey_running:
+                            self.youtube_sync_active = False  # Stop existing sync
                             self._detect_youtube_url(current_url)
                         elif self.auto_do_tone_enabled:
                             # Tự động kích hoạt Dò Tone (click sequence)
@@ -1693,9 +1801,15 @@ class App(ctk.CTk):
                 time.sleep(2)  # Check every 2 seconds instead of 1 (reduced CPU)
                 
             except Exception as e:
+                err = str(e).lower()
+                if any(k in err for k in ("no such window", "not reachable", "disconnected",
+                                          "target window already closed", "session deleted")):
+                    print("[YouTube Monitor] Browser closed by user, resetting state")
+                    self._reset_youtube_browser_state()
+                    return
                 print(f"[YouTube Monitor] Error: {e}")
                 time.sleep(3)
-        
+
         print("[YouTube Monitor] Stopped")
     
     def _detect_youtube_url(self, url):
@@ -1711,77 +1825,142 @@ class App(ctk.CTk):
             os.makedirs(temp_dir, exist_ok=True)
             
             audio_path = None
-            
-            # --- LOCAL DOWNLOAD (Using yt-dlp only) ---
-            print("[YouTube] Downloading with yt-dlp...")
-            self.after(0, lambda: self.autokey_status_label.configure(text="● DOWNLOADING...", text_color="#ffa726"))
-            
-            try:
-                import yt_dlp
-            except ImportError:
-                print("[YouTube] ERROR: yt_dlp not installed")
-                self.after(0, lambda: self.autokey_status_label.configure(text="● MISSING TOOL", text_color="#d32f2f"))
-                raise Exception("yt_dlp not installed")
-            
-            quality = "128"
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'extractaudio': True,
-                'audioformat': 'mp3',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': quality,
-                }],
-                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-                'quiet': True,
-                'no_warnings': True,
-                'noplaylist': True,
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=True)
-                audio_path = ydl.prepare_filename(info)
-                
+
+            def _download_audio_segment(max_seconds, name_prefix):
+                """Download a short YouTube audio segment to speed up first detection."""
+                print(f"[YouTube] Downloading {max_seconds}s with yt-dlp ({name_prefix})...")
+
+                try:
+                    import yt_dlp
+                except ImportError:
+                    print("[YouTube] ERROR: yt_dlp not installed")
+                    self.after(0, lambda: self.autokey_status_label.configure(
+                        text="MISSING TOOL", text_color="#d32f2f"
+                    ))
+                    raise Exception("yt_dlp not installed")
+
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'extractaudio': True,
+                    'audioformat': 'mp3',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '64',
+                    }],
+                    'postprocessor_args': {
+                        'ffmpeg_i': ['-t', str(int(max_seconds))],
+                    },
+                    'outtmpl': os.path.join(temp_dir, f'{name_prefix}_%(id)s.%(ext)s'),
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                }
+
+                # Limit network download to requested range (yt-dlp >= 2022.09)
+                try:
+                    ydl_opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(0, int(max_seconds))])
+                    ydl_opts['force_keyframes_at_cuts'] = False
+                except AttributeError:
+                    pass
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    path = ydl.prepare_filename(info)
+
                 # Fix extension if yt_dlp kept webm/m4a
-                if not os.path.exists(audio_path):
+                if not os.path.exists(path):
                     exts = ['.mp3', '.m4a', '.webm', '.opus']
-                    base = os.path.splitext(audio_path)[0]
+                    base = os.path.splitext(path)[0]
                     for e in exts:
                         if os.path.exists(base + e):
-                            audio_path = base + e
+                            path = base + e
                             break
+
+                return path
+            
+            # --- PHASE 1: QUICK DOWNLOAD (first ~40s) ---
+            print("[YouTube] Quick download (first ~40s)...")
+            self.after(0, lambda: self.autokey_status_label.configure(text="QUICK DOWNLOAD...", text_color="#ffa726"))
+            audio_path = _download_audio_segment(40, "quick")
 
             if not audio_path or not os.path.exists(audio_path):
                 raise Exception("Không thể lấy file âm thanh")
 
             # --- ANALYSIS ---
-            self.after(0, lambda: self.autokey_status_label.configure(text="● ANALYZING TONE...", text_color="#ffa726"))
-            
-            key, scale, confidence = None, None, 0
-            
-            # Try Essentia server first
+            self.youtube_sync_active = False
+
+            # === STEP 1: Quick Essentia scan (30s) — show key immediately ===
+            quick_key, quick_scale, quick_conf = None, None, 0
             if self.check_essentia_server():
-                print("[YouTube] Using Essentia server")
-                key, scale, confidence = self.detect_key_essentia(audio_path)
-            else:
-                print("[YouTube] Essentia server not available, using fallback")
-            
-            # Use fallback if essentia failed or unavailable
-            if not key or not scale:
-                print("[YouTube] Trying fallback detection...")
-                key, scale, confidence = self._detect_key_fallback(audio_path)
-            
-            # Clean up
-            try: os.remove(audio_path)
-            except: pass
-            
-            if key and scale:
-                self.after(0, lambda: self._update_autokey_display(key, scale, confidence / 100.0, 1.0))
-                method = "ESSENTIA" if self.check_essentia_server() else "FALLBACK"
-                self.after(0, lambda: self.autokey_status_label.configure(text=f"● DONE ({method})", text_color="#4caf50"))
-            else:
-                self.after(0, lambda: self.autokey_status_label.configure(text="● FAILED", text_color="#d32f2f"))
+                self.after(0, lambda: self.autokey_status_label.configure(
+                    text="● QUICK SCAN...", text_color="#ffa726"))
+                quick_key, quick_scale, quick_conf = self.detect_key_essentia(audio_path, duration=30)
+                if quick_key and quick_scale:
+                    self.after(0, lambda k=quick_key, s=quick_scale, c=quick_conf:
+                        self._update_autokey_display(k, s, c / 100.0, 1.0))
+                    self.after(0, lambda: self.autokey_status_label.configure(
+                        text="● SCANNING...", text_color="#ffa726"))
+                    print(f"[YouTube] Quick key: {quick_key} {quick_scale} ({quick_conf}%)")
+
+
+            try:
+                os.remove(audio_path)
+            except Exception:
+                pass
+            # === STEP 2: Full timeline analysis in background thread ===
+
+            def _bg_timeline(quick_k=quick_key, quick_s=quick_scale, quick_c=quick_conf):
+                audio_path_full = None
+                try:
+                    self.after(0, lambda: self.autokey_status_label.configure(text="DOWNLOADING (FULL)...", text_color="#ffa726"))
+                    audio_path_full = _download_audio_segment(155, "full")
+                    key_timeline = self._analyze_multi_key(audio_path_full)
+                finally:
+                    try:
+                        if audio_path_full and os.path.exists(audio_path_full):
+                            os.remove(audio_path_full)
+                    except Exception:
+                        pass
+
+                if not key_timeline:
+                    # Fallback to quick result if available
+                    if quick_k and quick_s:
+                        self.after(0, lambda: self.autokey_status_label.configure(
+                            text="● DONE (ESSENTIA)", text_color="#4caf50"))
+                    else:
+                        self.after(0, lambda: self.autokey_status_label.configure(
+                            text="● FAILED", text_color="#d32f2f"))
+                    return
+
+                distinct_keys = set((seg[2], seg[3]) for seg in key_timeline)
+                print(f"[YouTube] Timeline: {len(distinct_keys)} key(s): "
+                      f"{', '.join(f'{k} {s}' for k, s in distinct_keys)}")
+
+                if len(distinct_keys) > 1:
+                    for seg in key_timeline:
+                        print(f"  [{seg[0]:.0f}s-{seg[1]:.0f}s]: {seg[2]} {seg[3]} ({seg[4]:.0f}%)")
+                    first = key_timeline[0]
+                    self.after(0, lambda k=first[2], s=first[3], c=first[4]:
+                        self._update_autokey_display(k, s, c / 100.0, 1.0))
+                    n = len(distinct_keys)
+                    self.after(0, lambda n=n: self.autokey_status_label.configure(
+                        text=f"● SYNC ({n} KEYS)", text_color="#00bcd4"))
+                    self._start_youtube_time_sync(key_timeline)
+                else:
+                    # Single key: Essentia result already shown, just finalize status
+                    if quick_k and quick_s:
+                        self.after(0, lambda: self.autokey_status_label.configure(
+                            text="● DONE (ESSENTIA)", text_color="#4caf50"))
+                    else:
+                        seg = key_timeline[0]
+                        self.after(0, lambda k=seg[2], s=seg[3], c=seg[4]:
+                            self._update_autokey_display(k, s, c / 100.0, 1.0))
+                        self.after(0, lambda: self.autokey_status_label.configure(
+                            text="● DONE (FALLBACK)", text_color="#4caf50"))
+                    self._start_youtube_time_sync(key_timeline)
+
+            threading.Thread(target=_bg_timeline, daemon=True).start()
                 
         except Exception as e:
             print(f"[YouTube] Error: {e}")
@@ -1858,6 +2037,249 @@ class App(ctk.CTk):
             import traceback
             traceback.print_exc()
             return None, None, 0
+
+    def _detect_key_from_audio(self, y, sr):
+        """Detect key from audio array using HPSS + 3-profile ensemble voting."""
+        try:
+            import librosa
+            import numpy as np
+        except ImportError:
+            return None, None, 0
+
+        if len(y) < sr * 3:
+            return None, None, 0
+
+        # Separate harmonic content to remove drums/bass noise
+        y_harmonic, _ = librosa.effects.hpss(y)
+
+        # CQT chroma on harmonic signal
+        chroma = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr, hop_length=512)
+
+        # Filter low-energy frames (silence / noise)
+        frame_energy = np.sqrt(np.sum(chroma ** 2, axis=0))
+        thresh = np.median(frame_energy) * 0.3
+        chroma_active = chroma[:, frame_energy > thresh]
+        if chroma_active.shape[1] < 10:
+            chroma_active = chroma
+
+        chroma_norm = np.mean(chroma_active, axis=1)
+        chroma_norm = chroma_norm / (np.sum(chroma_norm) + 1e-10)
+
+        # Three profile sets
+        KK_MAJ = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+        KK_MIN = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+        TM_MAJ = np.array([5.0,  2.0,  3.5,  2.0,  4.5,  4.0,  2.0,  4.5,  2.0,  3.5,  1.5,  4.0])
+        TM_MIN = np.array([5.0,  2.0,  3.5,  4.5,  2.0,  4.0,  2.0,  4.5,  3.5,  2.0,  1.5,  4.0])
+        AA_MAJ = np.array([17.77, 0.15, 14.93, 0.16, 19.80, 11.36, 0.29, 22.06, 0.15, 8.15, 0.23, 4.95])
+        AA_MIN = np.array([18.26, 0.74, 14.05, 16.86, 0.70, 14.44, 0.70, 18.62, 4.57, 1.93, 7.38, 1.76])
+        PROFILES = [(KK_MAJ, KK_MIN), (TM_MAJ, TM_MIN), (AA_MAJ, AA_MIN)]
+
+        NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+        scores = {}
+        for maj, min_ in PROFILES:
+            for tonic in range(12):
+                for prof, scale in [(maj, 'Major'), (min_, 'Minor')]:
+                    corr = float(np.corrcoef(chroma_norm, np.roll(prof, tonic))[0, 1])
+                    key = (NOTE_NAMES[tonic], scale)
+                    scores[key] = scores.get(key, 0.0) + corr
+
+        best_key = max(scores, key=lambda k: scores[k])
+        avg_corr = scores[best_key] / len(PROFILES)
+        confidence = max(0, min(100, (avg_corr + 1) * 50))
+        return best_key[0], best_key[1], confidence
+
+    def _detect_key_from_chroma(self, chroma):
+        """Profile matching on a pre-computed chroma array (no HPSS, no audio loading)."""
+        import numpy as np
+
+        if chroma.shape[1] < 5:
+            return None, None, 0
+
+        frame_energy = np.sqrt(np.sum(chroma ** 2, axis=0))
+        thresh = np.median(frame_energy) * 0.3
+        active = chroma[:, frame_energy > thresh]
+        if active.shape[1] < 5:
+            active = chroma
+
+        chroma_norm = np.mean(active, axis=1)
+        chroma_norm = chroma_norm / (np.sum(chroma_norm) + 1e-10)
+
+        KK_MAJ = np.array([6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88])
+        KK_MIN = np.array([6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17])
+        TM_MAJ = np.array([5.0,  2.0,  3.5,  2.0,  4.5,  4.0,  2.0,  4.5,  2.0,  3.5,  1.5,  4.0])
+        TM_MIN = np.array([5.0,  2.0,  3.5,  4.5,  2.0,  4.0,  2.0,  4.5,  3.5,  2.0,  1.5,  4.0])
+        AA_MAJ = np.array([17.77, 0.15, 14.93, 0.16, 19.80, 11.36, 0.29, 22.06, 0.15, 8.15, 0.23, 4.95])
+        AA_MIN = np.array([18.26, 0.74, 14.05, 16.86, 0.70, 14.44, 0.70, 18.62, 4.57, 1.93, 7.38, 1.76])
+        PROFILES = [(KK_MAJ, KK_MIN), (TM_MAJ, TM_MIN), (AA_MAJ, AA_MIN)]
+        NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+        scores = {}
+        for maj, min_ in PROFILES:
+            for tonic in range(12):
+                for prof, scale in [(maj, 'Major'), (min_, 'Minor')]:
+                    corr = float(np.corrcoef(chroma_norm, np.roll(prof, tonic))[0, 1])
+                    key = (NOTE_NAMES[tonic], scale)
+                    scores[key] = scores.get(key, 0.0) + corr
+
+        best = max(scores, key=lambda k: scores[k])
+        avg_corr = scores[best] / len(PROFILES)
+        confidence = max(0, min(100, (avg_corr + 1) * 50))
+        return best[0], best[1], confidence
+
+    def _analyze_multi_key(self, audio_path, max_duration=150, segment_size=30):
+        """HPSS + chroma computed ONCE, then sliced per segment.
+        Uses dominant-key validation to filter noisy/isolated false detections.
+        Returns list of (start_sec, end_sec, key, scale, confidence)."""
+        try:
+            import librosa
+            import numpy as np
+        except ImportError:
+            print("[MultiKey] librosa not available")
+            return []
+
+        try:
+            print(f"[MultiKey] Loading audio (max {max_duration}s)...")
+            y, sr = librosa.load(audio_path, sr=22050, duration=max_duration)
+            total_duration = len(y) / sr
+            print(f"[MultiKey] {total_duration:.1f}s loaded, running HPSS...")
+
+            y_harmonic, _ = librosa.effects.hpss(y)
+            hop = 512
+            chroma_full = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr, hop_length=hop)
+            fps = chroma_full.shape[1] / total_duration
+
+            print(f"[MultiKey] Chroma {chroma_full.shape}, slicing {segment_size}s segments...")
+
+            # --- Step 1: raw key per segment ---
+            raw = []
+            t = 0.0
+            while t < total_duration:
+                end_t = min(t + segment_size, total_duration)
+                seg_chroma = chroma_full[:, int(t * fps):int(end_t * fps)]
+                key, scale, conf = self._detect_key_from_chroma(seg_chroma)
+                if key and scale:
+                    raw.append([t, end_t, key, scale, conf])
+                t += segment_size
+
+            if not raw:
+                return []
+
+            print(f"[MultiKey] Raw segments: "
+                  + " | ".join(f"{s[2]} {s[3]}({s[4]:.0f}%)" for s in raw))
+
+            # --- Step 2: find dominant key (highest total confidence weight) ---
+            from collections import defaultdict
+            weight = defaultdict(float)
+            for s in raw:
+                weight[(s[2], s[3])] += s[4]
+            dominant = max(weight, key=lambda k: weight[k])
+            print(f"[MultiKey] Dominant key: {dominant[0]} {dominant[1]}")
+
+            # --- Step 3: validate each segment ---
+            # Rule A: confidence < 45 → unreliable, use dominant
+            # Rule B: different from dominant AND isolated (no neighbor confirms it)
+            #         EXCEPT last segment with conf >= 60 (possible real end-key-change)
+            MIN_CONF = 45
+            HIGH_CONF = 60   # last segment kept even without neighbor if conf >= this
+            validated = []
+            for i, seg in enumerate(raw):
+                seg_key = (seg[2], seg[3])
+
+                if seg[4] < MIN_CONF:
+                    validated.append([seg[0], seg[1], dominant[0], dominant[1], seg[4]])
+                    continue
+
+                if seg_key != dominant:
+                    prev_ok = i > 0 and (raw[i-1][2], raw[i-1][3]) == seg_key
+                    next_ok = i < len(raw) - 1 and (raw[i+1][2], raw[i+1][3]) == seg_key
+                    is_last = (i == len(raw) - 1)
+
+                    if not prev_ok and not next_ok:
+                        # Last segment with high confidence → real key change at end
+                        if is_last and seg[4] >= HIGH_CONF:
+                            print(f"[MultiKey] Last seg {seg_key} conf={seg[4]:.0f}% → kept as end-key-change")
+                        else:
+                            print(f"[MultiKey] Isolated {seg_key} at {seg[0]:.0f}s → replaced with dominant")
+                            validated.append([seg[0], seg[1], dominant[0], dominant[1], seg[4]])
+                            continue
+
+                validated.append(seg)
+
+            # --- Step 4: merge consecutive identical ---
+            merged = [validated[0]]
+            for seg in validated[1:]:
+                if merged[-1][2] == seg[2] and merged[-1][3] == seg[3]:
+                    merged[-1][1] = seg[1]
+                    merged[-1][4] = max(merged[-1][4], seg[4])
+                else:
+                    merged.append(seg)
+
+            print(f"[MultiKey] Final: {len(merged)} segment(s): "
+                  + " | ".join(f"[{s[0]:.0f}s-{s[1]:.0f}s] {s[2]} {s[3]}" for s in merged))
+            return [(s[0], s[1], s[2], s[3], s[4]) for s in merged]
+
+        except Exception as e:
+            print(f"[MultiKey] Error: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+
+    def _get_youtube_current_time(self):
+        """Get current YouTube video playback time via Selenium JavaScript."""
+        try:
+            if self.youtube_browser:
+                t = self.youtube_browser.execute_script(
+                    "var v = document.querySelector('video'); return v ? v.currentTime : -1;"
+                )
+                val = float(t) if t is not None else -1
+                return val if val >= 0 else None
+        except Exception:
+            return None
+
+    def _start_youtube_time_sync(self, key_timeline):
+        """Start background thread that syncs displayed key with YouTube playback time."""
+        self.youtube_key_timeline = key_timeline
+        self.youtube_sync_active = True
+
+        def sync_loop():
+            last_key_pair = None
+            print(f"[YouTube Sync] Started — {len(key_timeline)} segment(s)")
+            while self.youtube_sync_active and self.youtube_monitor_active:
+                try:
+                    current_time = self._get_youtube_current_time()
+                    if current_time is not None:
+                        # Update time label
+                        mins = int(current_time) // 60
+                        secs = int(current_time) % 60
+                        time_str = f"⏱ {mins:02d}:{secs:02d}"
+                        self.after(0, lambda t=time_str: self.youtube_time_label.configure(text=t))
+
+                        if self.youtube_key_timeline:
+                            current_seg = None
+                            for seg in self.youtube_key_timeline:
+                                if seg[0] <= current_time < seg[1]:
+                                    current_seg = seg
+                                    break
+                            # Past the last segment → use last
+                            if current_seg is None and current_time >= self.youtube_key_timeline[-1][1]:
+                                current_seg = self.youtube_key_timeline[-1]
+
+                            if current_seg:
+                                key_pair = (current_seg[2], current_seg[3])
+                                if key_pair != last_key_pair:
+                                    last_key_pair = key_pair
+                                    k, s, c = current_seg[2], current_seg[3], current_seg[4]
+                                    print(f"[YouTube Sync] {current_time:.0f}s → {k} {s}")
+                                    self.after(0, lambda k=k, s=s, c=c:
+                                        self._update_autokey_display(k, s, c / 100.0, 1.0))
+                except Exception as e:
+                    print(f"[YouTube Sync] Error: {e}")
+                time.sleep(1)
+            self.after(0, lambda: self.youtube_time_label.configure(text=""))
+            print("[YouTube Sync] Stopped")
+
+        threading.Thread(target=sync_loop, daemon=True).start()
 
     def on_closing(self):
         print("\n🛑 Đang bắt đầu quy trình tắt...")
