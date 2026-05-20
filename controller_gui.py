@@ -324,8 +324,11 @@ class App(ctk.CTk):
             "send_x_offset": 0.5,
             "send_y_from_bottom": 140,
             "listen_duration": 15,
+            "analysis_duration": 30,
             "cubase_project_path": "",
-            "cubase_exit_action": "dont_save"
+            "cubase_exit_action": "dont_save",
+            "autokey_send_count": 3,
+            "autokey_send_intervals": [100, 100, 100]
         }
 
         # Auto-Key Detection state
@@ -900,7 +903,7 @@ class App(ctk.CTk):
 
         popup = ctk.CTkToplevel(self)
         popup.title("CÀI ĐẶT AUTO-KEY & THỜI GIAN")
-        popup.geometry("550x750")
+        popup.geometry("550x850")
         popup.resizable(False, False)
         popup.configure(fg_color=self.col_bg)
 
@@ -1021,6 +1024,24 @@ class App(ctk.CTk):
         analysis_duration_entry.grid(row=1, column=1, pady=8, padx=5)
         
         ctk.CTkLabel(timing_inner, text="(5-120s)", font=("Arial", 9), text_color="#888888").grid(row=1, column=2, sticky="w", padx=5)
+        
+        # Auto-Key Send Settings
+        ctk.CTkLabel(timing_inner, text="Số lần gửi key:", font=("Arial", 11, "bold")).grid(row=2, column=0, sticky="w", pady=8, padx=5)
+        autokey_send_count_entry = ctk.CTkEntry(timing_inner, width=80)
+        autokey_send_count_entry.insert(0, str(self.autokey_coords.get("autokey_send_count", 3)))
+        autokey_send_count_entry.grid(row=2, column=1, pady=8, padx=5)
+        
+        ctk.CTkLabel(timing_inner, text="(1-10)", font=("Arial", 9), text_color="#888888").grid(row=2, column=2, sticky="w", padx=5)
+        
+        # Auto-Key Send Intervals (different for each send)
+        ctk.CTkLabel(timing_inner, text="Khoảng thời gian (ms):", font=("Arial", 11, "bold")).grid(row=3, column=0, sticky="w", pady=8, padx=5)
+        autokey_send_intervals_entry = ctk.CTkEntry(timing_inner, width=150)
+        intervals = self.autokey_coords.get("autokey_send_intervals", [100, 100, 100])
+        intervals_str = ",".join(map(str, intervals))
+        autokey_send_intervals_entry.insert(0, intervals_str)
+        autokey_send_intervals_entry.grid(row=3, column=1, columnspan=2, pady=8, padx=5)
+        
+        ctk.CTkLabel(timing_inner, text="(Ví dụ: 100,150,200)", font=("Arial", 9), text_color="#888888").grid(row=4, column=0, sticky="w", padx=5)
 
         exit_action_var = ctk.StringVar(value=self.autokey_coords.get("cubase_exit_action", "dont_save"))
         
@@ -1038,7 +1059,7 @@ class App(ctk.CTk):
         
         exit_action_switch.grid(row=5, column=1, columnspan=2, pady=8, padx=5, sticky="ew")
 
-        info_text = ctk.CTkTextbox(popup, height=80, width=500, fg_color="#2a2a2a")
+        info_text = ctk.CTkTextbox(popup, height=110, width=500, fg_color="#2a2a2a")
         info_text.pack(pady=10, padx=20)
         info_text.insert("1.0",
             "💡 Hướng dẫn sử dụng Auto-Key:\n"
@@ -1046,9 +1067,10 @@ class App(ctk.CTk):
             "2. Click 'ĐO TỌA ĐỘ' để lấy vị trí nút Listen/Send\n"
             "3. Cài đặt thời gian nghe phù hợp (5-60s)\n"
             "4. Cài đặt thời gian phân tích file âm thanh (5-120s)\n"
-            "5. Click 'LƯU' để áp dụng cài đặt\n\n"
-            "⏱️ Thời gian nghe: Thời gian plugin Auto-Key phân tích\n"
-            "🎵 Thời gian phân tích: Thời gian phân tích file âm thanh"
+            "5. Cài đặt số lần gửi key (1-10) và khoảng thời gian\n"
+            "6. Click 'LƯU' để áp dụng cài đặt\n\n"
+            "⏱️ Số lần gửi: Số lần gửi key MIDI đến Cubase\n"
+            "⏲️ Khoảng thời gian: Độ trễ (ms) giữa các lần gửi"
         )
         info_text.configure(state="disabled")
 
@@ -1060,6 +1082,7 @@ class App(ctk.CTk):
                 # Validate timing values
                 listen_duration = int(listen_duration_entry.get())
                 analysis_duration = int(analysis_duration_entry.get())
+                autokey_send_count = int(autokey_send_count_entry.get())
                 
                 if not (5 <= listen_duration <= 60):
                     tkinter.messagebox.showerror("Lỗi", "Thời gian nghe phải từ 5-60 giây!")
@@ -1068,6 +1091,27 @@ class App(ctk.CTk):
                 if not (5 <= analysis_duration <= 120):
                     tkinter.messagebox.showerror("Lỗi", "Thời gian phân tích phải từ 5-120 giây!")
                     return
+                
+                if not (1 <= autokey_send_count <= 10):
+                    tkinter.messagebox.showerror("Lỗi", "Số lần gửi phải từ 1-10!")
+                    return
+                
+                # Parse and validate intervals
+                intervals_str = autokey_send_intervals_entry.get().strip()
+                try:
+                    intervals = [int(x.strip()) for x in intervals_str.split(",")]
+                except ValueError:
+                    tkinter.messagebox.showerror("Lỗi", "Khoảng thời gian phải là số! (Ví dụ: 100,150,200)")
+                    return
+                
+                if len(intervals) != autokey_send_count:
+                    tkinter.messagebox.showerror("Lỗi", f"Số lượng khoảng thời gian phải bằng số lần gửi ({autokey_send_count})!")
+                    return
+                
+                for interval in intervals:
+                    if not (50 <= interval <= 500):
+                        tkinter.messagebox.showerror("Lỗi", "Mỗi khoảng thời gian phải từ 50-500ms!")
+                        return
 
                 self.autokey_coords["listen_x_offset"] = float(listen_x_entry.get()) / 100
                 self.autokey_coords["listen_y_offset"] = float(listen_y_entry.get()) / 100
@@ -1077,6 +1121,8 @@ class App(ctk.CTk):
                 self.autokey_coords["cubase_exit_action"] = exit_action_var.get()
                 self.autokey_coords["listen_duration"] = listen_duration
                 self.autokey_coords["analysis_duration"] = analysis_duration
+                self.autokey_coords["autokey_send_count"] = autokey_send_count
+                self.autokey_coords["autokey_send_intervals"] = intervals
 
                 if self.save_autokey_coords():
                     tkinter.messagebox.showinfo("Thành công", "Đã lưu cài đặt Auto-Key!")
@@ -1295,6 +1341,15 @@ class App(ctk.CTk):
     def send_autokey_midi(self, key_str, scale_str):
         if not key_str or not scale_str: return
 
+        # Get send count and interval from settings
+        send_count = self.autokey_coords.get("autokey_send_count", 3)
+        send_intervals = self.autokey_coords.get("autokey_send_intervals", [100, 100, 100])
+        
+        # Ensure intervals list has correct length
+        while len(send_intervals) < send_count:
+            send_intervals.append(100)  # Default to 100ms if missing
+        send_intervals = send_intervals[:send_count]  # Trim if too many
+
         # Auto-Tune Keys Mapping (12 keys)
         KEYS = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
         FLAT_MAP = {"Db":"C#", "Eb":"D#", "Gb":"F#", "Ab":"G#", "Bb":"A#"}
@@ -1330,14 +1385,6 @@ class App(ctk.CTk):
                             found = True
                             break
         
-        if k in KEYS:
-            idx = KEYS.index(k)
-            # Map index 0-11 to 0-127
-            val = int(idx * (127 / (len(KEYS) - 1)))
-            midi.send_cc(CC_MAP["EXTRA_KNOB_1"], val)
-            # Debug
-            # print(f"Sent Key {k} (validx {idx}) -> CC {val}")
-
         # 2. Handle Scale
         s_in = scale_str.strip().lower()
         scale_idx = -1
@@ -1347,11 +1394,26 @@ class App(ctk.CTk):
                 scale_idx = i
                 break
         
-        if scale_idx != -1:
-            val = int(scale_idx * (127 / (len(SCALES) - 1)))
-            midi.send_cc(CC_MAP["EXTRA_KNOB_2"], val)
-            # Debug
-            # print(f"Sent Scale {scale_str} (validx {scale_idx}) -> CC {val}")
+        # Send multiple times with interval
+        for i in range(send_count):
+            if k in KEYS:
+                idx = KEYS.index(k)
+                # Map index 0-11 to 0-127
+                val = int(idx * (127 / (len(KEYS) - 1)))
+                midi.send_cc(CC_MAP["EXTRA_KNOB_1"], val)
+                # Debug
+                # print(f"Sent Key {k} (validx {idx}) -> CC {val}")
+            
+            if scale_idx != -1:
+                val = int(scale_idx * (127 / (len(SCALES) - 1)))
+                midi.send_cc(CC_MAP["EXTRA_KNOB_2"], val)
+                # Debug
+                # print(f"Sent Scale {scale_str} (validx {scale_idx}) -> CC {val}")
+            
+            # Wait before sending again (except on last iteration)
+            if i < send_count - 1:
+                send_interval_ms = send_intervals[i] if i < len(send_intervals) else 100
+                time.sleep(send_interval_ms / 1000.0)  # Convert ms to seconds
 
     def _update_autokey_display(self, key, mode, confidence, rms):
         """Update the Auto-Key UI with detected key (called from main thread)."""
