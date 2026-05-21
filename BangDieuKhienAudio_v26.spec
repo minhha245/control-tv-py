@@ -40,7 +40,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='BangDieuKhienAudio_v25',
+    name='BangDieuKhienAudio_v26',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -60,5 +60,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='BangDieuKhienAudio_v25',
+    name='BangDieuKhienAudio_v26',
 )

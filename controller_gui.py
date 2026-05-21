@@ -737,6 +737,35 @@ class App(ctk.CTk):
             percent = int((value / 127) * 100)
             self.slider_labels[key].configure(text=f"{percent}%")
 
+    def install_js_to_cubase(self):
+        import shutil
+        JS_FILENAME = "CustomController.js"
+        # Khi chạy từ exe (PyInstaller): dùng _MEIPASS; khi chạy script: dùng __file__
+        if hasattr(sys, '_MEIPASS'):
+            src = os.path.join(sys._MEIPASS, JS_FILENAME)
+        else:
+            src = os.path.join(os.path.dirname(os.path.abspath(__file__)), JS_FILENAME)
+
+        if not os.path.exists(src):
+            tkinter.messagebox.showerror("Lỗi", f"Không tìm thấy file:\n{JS_FILENAME}\nHãy đặt file cạnh chương trình.")
+            return
+
+        dest_dir = os.path.join(
+            os.path.expanduser("~"), "Documents", "Steinberg", "Cubase",
+            "MIDI Remote", "Driver Scripts", "Local", "HauSetup", "TiengVietController"
+        )
+        try:
+            os.makedirs(dest_dir, exist_ok=True)
+            dest = os.path.join(dest_dir, JS_FILENAME)
+            shutil.copy2(src, dest)
+            tkinter.messagebox.showinfo(
+                "Thành công",
+                f"Đã cài JS vào Cubase!\n\n{dest}\n\nKhởi động lại Cubase để áp dụng."
+            )
+            print(f"[CÀI JS] Đã copy {JS_FILENAME} → {dest}")
+        except Exception as e:
+            tkinter.messagebox.showerror("Lỗi", f"Không thể cài JS:\n{e}")
+
     def save_settings(self):
         btn = self.btn_widgets.get("SAVE")
         if btn:
@@ -1152,6 +1181,16 @@ class App(ctk.CTk):
             command=on_close_popup
         ).pack(side="left", padx=10)
 
+        ctk.CTkButton(
+            btn_frame,
+            text="CÀI JS",
+            fg_color="#607d8b",
+            width=100,
+            height=35,
+            font=("Arial", 12, "bold"),
+            command=self.install_js_to_cubase
+        ).pack(side="left", padx=10)
+
     def start_autokey(self):
         print("Bắt đầu Dò Tone...")
         cc = CC_MAP.get("DO_TONE")
@@ -1202,9 +1241,16 @@ class App(ctk.CTk):
                 time.sleep(1)
             print("✅ Hoàn thành phân tích!")
 
-            print(f"Click Send ({send_x}, {send_y})...")
-            WindowsHelper.click(send_x, send_y)
-            time.sleep(0.3)  # Fixed delay after send
+            send_count = self.autokey_coords.get("autokey_send_count", 3)
+            send_intervals = self.autokey_coords.get("autokey_send_intervals", [100, 100, 100])
+            while len(send_intervals) < send_count:
+                send_intervals.append(100)
+
+            for i in range(send_count):
+                print(f"Click Send ({send_x}, {send_y}) lần {i+1}/{send_count}...")
+                WindowsHelper.click(send_x, send_y)
+                if i < send_count - 1:
+                    time.sleep(send_intervals[i] / 1000.0)
 
             WindowsHelper.set_cursor_pos(original_pos[0], original_pos[1])
             print("✅ Xong quy trình Auto-Key!")
@@ -1255,8 +1301,16 @@ class App(ctk.CTk):
             send_x = rect['left'] + int(rect['width'] * self.autokey_coords["send_x_offset"])
             send_y = rect['top'] + rect['height'] - self.autokey_coords["send_y_from_bottom"]
 
-            print(f"Click Send ({send_x}, {send_y})...")
-            WindowsHelper.click(send_x, send_y)
+            send_count = self.autokey_coords.get("autokey_send_count", 3)
+            send_intervals = self.autokey_coords.get("autokey_send_intervals", [100, 100, 100])
+            while len(send_intervals) < send_count:
+                send_intervals.append(100)
+
+            for i in range(send_count):
+                print(f"Click Send ({send_x}, {send_y}) lần {i+1}/{send_count}...")
+                WindowsHelper.click(send_x, send_y)
+                if i < send_count - 1:
+                    time.sleep(send_intervals[i] / 1000.0)
 
             WindowsHelper.set_cursor_pos(original_pos[0], original_pos[1])
             print("✅ Xong quy trình!")
@@ -1277,7 +1331,7 @@ class App(ctk.CTk):
         """Toggle Auto-Key detection on/off."""
         # Toggle monitoring state
         self.autokey_running = not self.autokey_running
-        
+
         if self.autokey_running:
             # STOP AUTO DÒ if running
             if self.auto_do_tone_enabled:
@@ -1516,7 +1570,7 @@ class App(ctk.CTk):
                         print("[Essentia] ✅ Server ready and responding")
                         self.after(1000, self._set_server_default_duration)
                         return
-                
+
                 print(f"[Essentia] WARNING: Server started but not responding after 10s")
                 return
                     
@@ -1889,8 +1943,8 @@ class App(ctk.CTk):
             audio_path = None
 
             def _download_audio_segment(max_seconds, name_prefix):
-                """Download a short YouTube audio segment to speed up first detection."""
-                print(f"[YouTube] Downloading {max_seconds}s with yt-dlp ({name_prefix})...")
+                """Download audio stream trực tiếp (không convert), giới hạn thời gian."""
+                print(f"[YouTube] Downloading audio {max_seconds}s ({name_prefix})...")
 
                 try:
                     import yt_dlp
@@ -1901,25 +1955,16 @@ class App(ctk.CTk):
                     ))
                     raise Exception("yt_dlp not installed")
 
+                # Download audio-only stream, không convert → nhanh hơn
                 ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'extractaudio': True,
-                    'audioformat': 'mp3',
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '64',
-                    }],
-                    'postprocessor_args': {
-                        'ffmpeg_i': ['-t', str(int(max_seconds))],
-                    },
+                    'format': 'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio/best',
                     'outtmpl': os.path.join(temp_dir, f'{name_prefix}_%(id)s.%(ext)s'),
                     'quiet': True,
                     'no_warnings': True,
                     'noplaylist': True,
                 }
 
-                # Limit network download to requested range (yt-dlp >= 2022.09)
+                # Giới hạn thời gian download
                 try:
                     ydl_opts['download_ranges'] = yt_dlp.utils.download_range_func(None, [(0, int(max_seconds))])
                     ydl_opts['force_keyframes_at_cuts'] = False
@@ -1930,9 +1975,9 @@ class App(ctk.CTk):
                     info = ydl.extract_info(url, download=True)
                     path = ydl.prepare_filename(info)
 
-                # Fix extension if yt_dlp kept webm/m4a
+                # Tìm file nếu extension khác
                 if not os.path.exists(path):
-                    exts = ['.mp3', '.m4a', '.webm', '.opus']
+                    exts = ['.m4a', '.webm', '.opus', '.mp3', '.ogg']
                     base = os.path.splitext(path)[0]
                     for e in exts:
                         if os.path.exists(base + e):
@@ -1940,11 +1985,12 @@ class App(ctk.CTk):
                             break
 
                 return path
-            
-            # --- PHASE 1: QUICK DOWNLOAD (first ~40s) ---
-            print("[YouTube] Quick download (first ~40s)...")
+
+            # --- PHASE 1: QUICK DOWNLOAD (theo analysis_duration trong cài đặt) ---
+            QUICK_SECONDS = self.autokey_coords.get("analysis_duration", 30)
+            print(f"[YouTube] Quick download (first ~{QUICK_SECONDS}s)...")
             self.after(0, lambda: self.autokey_status_label.configure(text="QUICK DOWNLOAD...", text_color="#ffa726"))
-            audio_path = _download_audio_segment(40, "quick")
+            audio_path = _download_audio_segment(QUICK_SECONDS, "quick")
 
             if not audio_path or not os.path.exists(audio_path):
                 raise Exception("Không thể lấy file âm thanh")
@@ -1952,18 +1998,22 @@ class App(ctk.CTk):
             # --- ANALYSIS ---
             self.youtube_sync_active = False
 
-            # === STEP 1: Quick Essentia scan (30s) — show key immediately ===
+            # === STEP 1: Quick scan bằng librosa (local, không cần HTTP) ===
             quick_key, quick_scale, quick_conf = None, None, 0
-            if self.check_essentia_server():
+            try:
+                import librosa as _librosa
                 self.after(0, lambda: self.autokey_status_label.configure(
                     text="● QUICK SCAN...", text_color="#ffa726"))
-                quick_key, quick_scale, quick_conf = self.detect_key_essentia(audio_path, duration=30)
+                _y, _sr = _librosa.load(audio_path, sr=22050, duration=QUICK_SECONDS)
+                quick_key, quick_scale, quick_conf = self._detect_key_from_audio(_y, _sr)
                 if quick_key and quick_scale:
                     self.after(0, lambda k=quick_key, s=quick_scale, c=quick_conf:
                         self._update_autokey_display(k, s, c / 100.0, 1.0))
                     self.after(0, lambda: self.autokey_status_label.configure(
                         text="● SCANNING...", text_color="#ffa726"))
-                    print(f"[YouTube] Quick key: {quick_key} {quick_scale} ({quick_conf}%)")
+                    print(f"[YouTube] Quick key: {quick_key} {quick_scale} ({quick_conf:.0f}%)")
+            except Exception as _e:
+                print(f"[YouTube] Quick scan error: {_e}")
 
 
             try:
@@ -1976,7 +2026,7 @@ class App(ctk.CTk):
                 audio_path_full = None
                 try:
                     self.after(0, lambda: self.autokey_status_label.configure(text="DOWNLOADING (FULL)...", text_color="#ffa726"))
-                    audio_path_full = _download_audio_segment(155, "full")
+                    audio_path_full = _download_audio_segment(600, "full")
                     key_timeline = self._analyze_multi_key(audio_path_full)
                 finally:
                     try:
@@ -2189,9 +2239,9 @@ class App(ctk.CTk):
         confidence = max(0, min(100, (avg_corr + 1) * 50))
         return best[0], best[1], confidence
 
-    def _analyze_multi_key(self, audio_path, max_duration=150, segment_size=30):
-        """HPSS + chroma computed ONCE, then sliced per segment.
-        Uses dominant-key validation to filter noisy/isolated false detections.
+    def _analyze_multi_key(self, audio_path, segment_size=30):
+        """Phân tích key theo segment 30s trên toàn bộ bài (không giới hạn thời gian).
+        Chroma tính 1 lần, validation neighbor để lọc noise.
         Returns list of (start_sec, end_sec, key, scale, confidence)."""
         try:
             import librosa
@@ -2201,8 +2251,8 @@ class App(ctk.CTk):
             return []
 
         try:
-            print(f"[MultiKey] Loading audio (max {max_duration}s)...")
-            y, sr = librosa.load(audio_path, sr=22050, duration=max_duration)
+            print(f"[MultiKey] Loading full audio...")
+            y, sr = librosa.load(audio_path, sr=22050)
             total_duration = len(y) / sr
             print(f"[MultiKey] {total_duration:.1f}s loaded, running HPSS...")
 
@@ -2211,13 +2261,15 @@ class App(ctk.CTk):
             chroma_full = librosa.feature.chroma_cqt(y=y_harmonic, sr=sr, hop_length=hop)
             fps = chroma_full.shape[1] / total_duration
 
-            print(f"[MultiKey] Chroma {chroma_full.shape}, slicing {segment_size}s segments...")
+            print(f"[MultiKey] Slicing {segment_size}s segments over {total_duration:.0f}s...")
 
             # --- Step 1: raw key per segment ---
             raw = []
             t = 0.0
             while t < total_duration:
                 end_t = min(t + segment_size, total_duration)
+                if end_t - t < 5:  # bỏ mảnh quá ngắn cuối bài
+                    break
                 seg_chroma = chroma_full[:, int(t * fps):int(end_t * fps)]
                 key, scale, conf = self._detect_key_from_chroma(seg_chroma)
                 if key and scale:
@@ -2230,7 +2282,7 @@ class App(ctk.CTk):
             print(f"[MultiKey] Raw segments: "
                   + " | ".join(f"{s[2]} {s[3]}({s[4]:.0f}%)" for s in raw))
 
-            # --- Step 2: find dominant key (highest total confidence weight) ---
+            # --- Step 2: dominant key ---
             from collections import defaultdict
             weight = defaultdict(float)
             for s in raw:
@@ -2238,12 +2290,9 @@ class App(ctk.CTk):
             dominant = max(weight, key=lambda k: weight[k])
             print(f"[MultiKey] Dominant key: {dominant[0]} {dominant[1]}")
 
-            # --- Step 3: validate each segment ---
-            # Rule A: confidence < 45 → unreliable, use dominant
-            # Rule B: different from dominant AND isolated (no neighbor confirms it)
-            #         EXCEPT last segment with conf >= 60 (possible real end-key-change)
+            # --- Step 3: validate — lọc segment cô lập không có neighbor xác nhận ---
             MIN_CONF = 45
-            HIGH_CONF = 60   # last segment kept even without neighbor if conf >= this
+            HIGH_CONF = 60
             validated = []
             for i, seg in enumerate(raw):
                 seg_key = (seg[2], seg[3])
@@ -2254,13 +2303,11 @@ class App(ctk.CTk):
 
                 if seg_key != dominant:
                     prev_ok = i > 0 and (raw[i-1][2], raw[i-1][3]) == seg_key
-                    next_ok = i < len(raw) - 1 and (raw[i+1][2], raw[i+1][3]) == seg_key
+                    next_ok = i < len(raw)-1 and (raw[i+1][2], raw[i+1][3]) == seg_key
                     is_last = (i == len(raw) - 1)
-
                     if not prev_ok and not next_ok:
-                        # Last segment with high confidence → real key change at end
                         if is_last and seg[4] >= HIGH_CONF:
-                            print(f"[MultiKey] Last seg {seg_key} conf={seg[4]:.0f}% → kept as end-key-change")
+                            print(f"[MultiKey] Last seg {seg_key} conf={seg[4]:.0f}% → kept")
                         else:
                             print(f"[MultiKey] Isolated {seg_key} at {seg[0]:.0f}s → replaced with dominant")
                             validated.append([seg[0], seg[1], dominant[0], dominant[1], seg[4]])
@@ -2269,13 +2316,13 @@ class App(ctk.CTk):
                 validated.append(seg)
 
             # --- Step 4: merge consecutive identical ---
-            merged = [validated[0]]
+            merged = [list(validated[0])]
             for seg in validated[1:]:
                 if merged[-1][2] == seg[2] and merged[-1][3] == seg[3]:
                     merged[-1][1] = seg[1]
                     merged[-1][4] = max(merged[-1][4], seg[4])
                 else:
-                    merged.append(seg)
+                    merged.append(list(seg))
 
             print(f"[MultiKey] Final: {len(merged)} segment(s): "
                   + " | ".join(f"[{s[0]:.0f}s-{s[1]:.0f}s] {s[2]} {s[3]}" for s in merged))
